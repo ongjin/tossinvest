@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+<style>html,body{margin:0;padding:0;}svg{display:block;}</style>
+</head>
+<body>
+<svg id="c" width="1120" height="840" viewBox="0 0 1120 840" xmlns="http://www.w3.org/2000/svg"></svg>
+<div id="flag" style="font-family:'Nanum Pen Script';position:absolute;left:-9999px;">loading</div>
+<script>
+const svgns="http://www.w3.org/2000/svg";
+const svg=document.getElementById("c");
+let rc;
+
+const PALETTE={ yellow:"#ffec99", blue:"#d0ebff", green:"#b2f2bb", orange:"#ffd8a8", red:"#ffc9c9" };
+const DARK = new URLSearchParams(location.search).get('mode')==='dark';
+const INK   = DARK ? "#ececec" : "#1e1e1e";
+const STROKE= INK, LABEL = INK;
+const RED   = DARK ? "#ff8787" : "#e03131";
+const BG    = DARK ? "#1b1b1f" : "#fffdf7";
+
+function txt(x,y,s,o={}){
+  const {size=24,color=INK,anchor="middle",rot=0}=o;
+  const t=document.createElementNS(svgns,"text");
+  t.setAttribute("x",x);t.setAttribute("y",y);
+  t.setAttribute("font-family","'Nanum Pen Script', cursive");
+  t.setAttribute("font-size",size);t.setAttribute("fill",color);
+  t.setAttribute("text-anchor",anchor);
+  if(rot)t.setAttribute("transform",`rotate(${rot} ${x} ${y})`);
+  t.textContent=s;svg.appendChild(t);
+}
+function boxLabel(cx,cy,lines,o={}){
+  const {size=23,color=LABEL}=o;const lh=size*0.95;
+  const startY=cy-((lines.length-1)*lh)/2+size*0.30;
+  lines.forEach((ln,i)=>txt(cx,startY+i*lh,ln,{size,color}));
+}
+function box(x,y,w,h,fill,lines,o={}){
+  svg.appendChild(rc.rectangle(x,y,w,h,{roughness:1.7,stroke:o.stroke||STROKE,strokeWidth:2,fill,fillStyle:"hachure",fillWeight:1.35,hachureGap:6}));
+  boxLabel(x+w/2,y+h/2,lines,{size:o.labelSize||23,color:o.labelColor||LABEL});
+}
+function frame(x,y,w,h,o={}){
+  svg.appendChild(rc.rectangle(x,y,w,h,{roughness:1.4,stroke:o.stroke||INK,strokeWidth:o.sw||2,strokeLineDash:o.dash||undefined}));
+}
+function cylinder(x,y,w,h,fill,lines,o={}){
+  const cx=x+w/2, ry=Math.min(h*0.16,20), stroke=o.stroke||STROKE, rx=w/2;
+  const fillO={roughness:1.5,stroke:"none",fill,fillStyle:"hachure",fillWeight:1.2,hachureGap:6};
+  const sil=[], segs=28;
+  for(let i=0;i<=segs;i++){const t=Math.PI+Math.PI*(i/segs);sil.push([cx+rx*Math.cos(t),(y+ry)+ry*Math.sin(t)]);}
+  for(let i=0;i<=segs;i++){const t=Math.PI*(i/segs);sil.push([cx+rx*Math.cos(t),(y+h-ry)+ry*Math.sin(t)]);}
+  svg.appendChild(rc.polygon(sil,fillO));
+  svg.appendChild(rc.ellipse(cx,y+ry,w,2*ry,{roughness:1.5,stroke,strokeWidth:2}));
+  svg.appendChild(rc.line(x,y+ry,x,y+h-ry,{roughness:1.3,stroke,strokeWidth:2}));
+  svg.appendChild(rc.line(x+w,y+ry,x+w,y+h-ry,{roughness:1.3,stroke,strokeWidth:2}));
+  svg.appendChild(rc.arc(cx,y+h-ry,w,2*ry,0,Math.PI,false,{roughness:1.3,stroke,strokeWidth:2}));
+  boxLabel(cx,y+h*0.56,lines,{size:o.labelSize||21,color:o.labelColor||LABEL});
+}
+function diamond(cx,cy,w,h,fill,lines,o={}){
+  svg.appendChild(rc.polygon([[cx,cy-h/2],[cx+w/2,cy],[cx,cy+h/2],[cx-w/2,cy]],{roughness:1.6,stroke:o.stroke||STROKE,strokeWidth:2,fill,fillStyle:"hachure",fillWeight:1.3,hachureGap:6}));
+  boxLabel(cx,cy,lines,{size:o.labelSize||21,color:o.labelColor||LABEL});
+}
+function ellipse(cx,cy,w,h,fill,lines,o={}){
+  svg.appendChild(rc.ellipse(cx,cy,w,h,{roughness:1.6,stroke:o.stroke||STROKE,strokeWidth:2,fill,fillStyle:"hachure",fillWeight:1.3,hachureGap:6}));
+  if(lines) boxLabel(cx,cy,lines,{size:o.labelSize||21,color:o.labelColor||LABEL});
+}
+function aHead(x2,y2,ang,opt){
+  const len=13,sp=0.45;
+  svg.appendChild(rc.line(x2,y2,x2+len*Math.cos(ang+Math.PI-sp),y2+len*Math.sin(ang+Math.PI-sp),opt));
+  svg.appendChild(rc.line(x2,y2,x2+len*Math.cos(ang+Math.PI+sp),y2+len*Math.sin(ang+Math.PI+sp),opt));
+}
+function line(x1,y1,x2,y2,o={}){
+  svg.appendChild(rc.line(x1,y1,x2,y2,{roughness:1.4,stroke:o.stroke||INK,strokeWidth:o.sw||2,strokeLineDash:o.dash||undefined}));
+}
+function arrow(x1,y1,x2,y2,o={}){
+  const opt={roughness:1.5,stroke:o.stroke||INK,strokeWidth:o.sw||2,strokeLineDash:o.dash||undefined};
+  svg.appendChild(rc.line(x1,y1,x2,y2,opt));
+  aHead(x2,y2,Math.atan2(y2-y1,x2-x1),opt);
+}
+function xmark(cx,cy,r,o={}){
+  const opt={roughness:1.8,stroke:o.stroke||RED,strokeWidth:o.sw||4};
+  svg.appendChild(rc.line(cx-r,cy-r,cx+r,cy+r,opt));
+  svg.appendChild(rc.line(cx+r,cy-r,cx-r,cy+r,opt));
+}
+
+function draw(){
+  rc=rough.svg(svg);
+
+  /* ======================= replace below ======================= */
+  txt(560,48,"LLM 에게 증권계좌를 안전하게 쥐여주기 — 3중 방어",{size:33});
+  txt(560,80,"주문 한 건이 게이트 3개를 모두 통과해야 실제 체결된다",{size:20,color:"#888"});
+
+  // --- LLM ---
+  ellipse(560,150,360,84,PALETTE.blue,["LLM · AI 에이전트   \"삼성전자 100주 사줘\""],{labelSize:21});
+  arrow(560,192,560,230);
+
+  // --- ① 모드 게이트 ---
+  frame(60,238,1000,118,{dash:[9,8],stroke:"#1b6ec2"});
+  txt(76,262,"① 모드 게이트 — 기본값이 안전(paper)",{size:19,anchor:"start",color:"#1b4f72"});
+  box(110,278,260,64,PALETTE.red,["read_only","주문 툴 미등록"],{labelSize:19});
+  box(430,278,260,64,PALETTE.green,["paper  (기본값)","로컬 시뮬 체결"],{labelSize:19});
+  box(750,278,260,64,PALETTE.orange,["live","ALLOW_LIVE=1 이중게이트"],{labelSize:17});
+  xmark(240,360,12);
+  arrow(560,356,560,398);  txt(575,382,"paper · live 만 주문 툴 등록",{size:16,anchor:"start",color:"#777"});
+
+  // --- ② 2단계 주문 ---
+  frame(60,404,1000,150,{dash:[9,8],stroke:"#1b6ec2"});
+  txt(76,428,"② 2단계 주문 — human-in-the-loop",{size:19,anchor:"start",color:"#1b4f72"});
+  box(150,448,250,92,PALETTE.yellow,["preview_order","가드레일 검사 · 예상비용"],{labelSize:19});
+  arrow(400,494,520,494);  txt(560,482,"confirmation",{size:16,color:"#666"}); txt(560,500,"token",{size:16,color:"#666"});
+  box(640,448,250,92,PALETTE.yellow,["place_order","token 必 · 멱등"],{labelSize:19});
+  txt(910,478,"토큰 없으면",{size:17,anchor:"start",color:RED});
+  txt(910,500,"즉시 거부",{size:17,anchor:"start",color:RED});
+  arrow(560,554,560,600);
+
+  // --- ③ 가드레일 ---
+  frame(60,606,1000,116,{dash:[9,8],stroke:"#2b8a3e"});
+  txt(76,630,"③ 가드레일 — paper · live 모두 적용",{size:19,anchor:"start",color:"#145a32"});
+  box(80,646,148,60,PALETTE.green,["주문당 상한"],{labelSize:18});
+  box(238,646,148,60,PALETTE.green,["일일 누적"],{labelSize:18});
+  box(396,646,148,60,PALETTE.green,["allow / deny"],{labelSize:18});
+  box(554,646,148,60,PALETTE.orange,["1억↑ confirm"],{labelSize:17});
+  box(712,646,148,60,PALETTE.red,["30억↑ 거부"],{labelSize:17});
+  box(870,646,148,60,PALETTE.blue,["장운영 (live)"],{labelSize:17});
+
+  // --- 결과 ---
+  arrow(440,722,360,752);  txt(360,742,"paper",{size:16,color:"#777"});
+  arrow(680,722,760,752);  txt(742,742,"live",{size:16,color:"#777"});
+  box(230,754,270,72,PALETTE.green,["시뮬 포트폴리오","paper · 실주문 0건"],{labelSize:19});
+  cylinder(700,748,160,82,PALETTE.yellow,["토스 Open API","실주문 (live)"],{labelSize:18});
+  /* ======================== end replace ======================== */
+
+  document.getElementById("flag").textContent="DIAGRAM-READY";
+}
+
+window.addEventListener("load",async()=>{
+  try{
+    await document.fonts.load("24px 'Nanum Pen Script'");
+    await document.fonts.load("40px 'Nanum Pen Script'");
+    await document.fonts.ready;
+  }catch(e){}
+  document.body.style.background=BG; svg.style.background=BG;
+  draw();
+});
+</script>
+</body>
+</html>

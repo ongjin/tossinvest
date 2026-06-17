@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+<style>html,body{margin:0;padding:0;}svg{display:block;}</style>
+</head>
+<body>
+<svg id="c" width="1260" height="600" viewBox="0 0 1260 600" xmlns="http://www.w3.org/2000/svg"></svg>
+<div id="flag" style="font-family:'Nanum Pen Script';position:absolute;left:-9999px;">loading</div>
+<script>
+const svgns="http://www.w3.org/2000/svg";
+const svg=document.getElementById("c");
+let rc;
+
+const PALETTE={ yellow:"#ffec99", blue:"#d0ebff", green:"#b2f2bb", orange:"#ffd8a8", red:"#ffc9c9" };
+const DARK = new URLSearchParams(location.search).get('mode')==='dark';
+const INK   = DARK ? "#ececec" : "#1e1e1e";
+const STROKE= INK, LABEL = INK;
+const RED   = DARK ? "#ff8787" : "#e03131";
+const BG    = DARK ? "#1b1b1f" : "#fffdf7";
+
+function txt(x,y,s,o={}){
+  const {size=24,color=INK,anchor="middle",rot=0}=o;
+  const t=document.createElementNS(svgns,"text");
+  t.setAttribute("x",x);t.setAttribute("y",y);
+  t.setAttribute("font-family","'Nanum Pen Script', cursive");
+  t.setAttribute("font-size",size);t.setAttribute("fill",color);
+  t.setAttribute("text-anchor",anchor);
+  if(rot)t.setAttribute("transform",`rotate(${rot} ${x} ${y})`);
+  t.textContent=s;svg.appendChild(t);
+}
+function boxLabel(cx,cy,lines,o={}){
+  const {size=23,color=LABEL}=o;const lh=size*0.95;
+  const startY=cy-((lines.length-1)*lh)/2+size*0.30;
+  lines.forEach((ln,i)=>txt(cx,startY+i*lh,ln,{size,color}));
+}
+function box(x,y,w,h,fill,lines,o={}){
+  svg.appendChild(rc.rectangle(x,y,w,h,{roughness:1.7,stroke:o.stroke||STROKE,strokeWidth:2,fill,fillStyle:"hachure",fillWeight:1.35,hachureGap:6}));
+  boxLabel(x+w/2,y+h/2,lines,{size:o.labelSize||23,color:o.labelColor||LABEL});
+}
+function diamond(cx,cy,w,h,fill,lines,o={}){
+  svg.appendChild(rc.polygon([[cx,cy-h/2],[cx+w/2,cy],[cx,cy+h/2],[cx-w/2,cy]],{roughness:1.6,stroke:o.stroke||STROKE,strokeWidth:2,fill,fillStyle:"hachure",fillWeight:1.3,hachureGap:6}));
+  boxLabel(cx,cy,lines,{size:o.labelSize||21,color:o.labelColor||LABEL});
+}
+function aHead(x2,y2,ang,opt){
+  const len=13,sp=0.45;
+  svg.appendChild(rc.line(x2,y2,x2+len*Math.cos(ang+Math.PI-sp),y2+len*Math.sin(ang+Math.PI-sp),opt));
+  svg.appendChild(rc.line(x2,y2,x2+len*Math.cos(ang+Math.PI+sp),y2+len*Math.sin(ang+Math.PI+sp),opt));
+}
+function line(x1,y1,x2,y2,o={}){
+  svg.appendChild(rc.line(x1,y1,x2,y2,{roughness:1.4,stroke:o.stroke||INK,strokeWidth:o.sw||2,strokeLineDash:o.dash||undefined}));
+}
+function arrow(x1,y1,x2,y2,o={}){
+  const opt={roughness:1.5,stroke:o.stroke||INK,strokeWidth:o.sw||2,strokeLineDash:o.dash||undefined};
+  svg.appendChild(rc.line(x1,y1,x2,y2,opt));
+  aHead(x2,y2,Math.atan2(y2-y1,x2-x1),opt);
+}
+function curveArrow(pts,o={}){
+  const opt={roughness:1.3,stroke:o.stroke||INK,strokeWidth:o.sw||2,strokeLineDash:o.dash||undefined};
+  svg.appendChild(rc.curve(pts,opt));
+  const n=pts.length, a=Math.atan2(pts[n-1][1]-pts[n-2][1],pts[n-1][0]-pts[n-2][0]);
+  aHead(pts[n-1][0],pts[n-1][1],a,opt);
+}
+
+function draw(){
+  rc=rough.svg(svg);
+
+  /* ======================= replace below ======================= */
+  txt(630,46,"preview → place — 멱등 2단계 주문",{size:33});
+  txt(630,77,"토큰은 성공 시에만 소비 → 실패하면 같은 clientOrderId 로 안전 재시도",{size:20,color:"#888"});
+
+  // --- Lane A: preview (왼→오) ---
+  box(70,135,180,72,PALETTE.blue,["preview_order"],{labelSize:21});
+  arrow(250,171,332,171);
+  diamond(420,171,158,96,PALETTE.yellow,["가드레일","통과?"],{labelSize:19});
+  arrow(420,219,420,260);  box(330,262,180,52,PALETTE.red,["거부 · GuardrailError"],{labelSize:17});
+  txt(506,162,"예",{size:15,color:"#666",anchor:"start"});  arrow(499,171,572,171);
+  box(572,135,188,72,PALETTE.green,["issue_token","clientOrderId 자동"],{labelSize:18});
+  arrow(760,171,838,171);
+  box(838,135,238,72,PALETTE.yellow,["confirmation_token","+ 예상비용·수수료"],{labelSize:18});
+
+  // token → place 연결
+  arrow(957,207,957,336);  txt(973,278,"token",{size:16,color:"#777",anchor:"start"});
+
+  // --- Lane B: place (오→왼) ---
+  box(840,338,234,72,PALETTE.blue,["place_order(token)"],{labelSize:20});
+  arrow(840,374,762,374);
+  box(596,338,166,72,PALETTE.orange,["consume","토큰 검증"],{labelSize:18});
+  arrow(596,374,514,374);
+  box(352,338,162,72,PALETTE.green,["체결","paper / live"],{labelSize:18});
+  arrow(352,374,292,374);
+  diamond(214,374,152,96,PALETTE.yellow,["성공?"],{labelSize:20});
+
+  // 성공 → finalize → 결과
+  arrow(214,422,214,460);  txt(230,448,"성공",{size:15,color:"#666",anchor:"start"});
+  box(122,462,186,64,PALETTE.green,["finalize","토큰 소비 · 일일 기록"],{labelSize:17});
+  arrow(308,494,396,494);
+  box(396,462,190,64,PALETTE.yellow,["주문 결과 반환"],{labelSize:20});
+
+  // 실패 → 재시도 루프 (토큰 유지)
+  curveArrow([[214,326],[440,250],[770,250],[868,336]],{stroke:RED,sw:2,dash:[7,7]});
+  txt(560,242,"실패 → 토큰 유지 · 같은 clientOrderId 로 재시도 (멱등)",{size:19,color:RED});
+  /* ======================== end replace ======================== */
+
+  document.getElementById("flag").textContent="DIAGRAM-READY";
+}
+
+window.addEventListener("load",async()=>{
+  try{
+    await document.fonts.load("24px 'Nanum Pen Script'");
+    await document.fonts.load("40px 'Nanum Pen Script'");
+    await document.fonts.ready;
+  }catch(e){}
+  document.body.style.background=BG; svg.style.background=BG;
+  draw();
+});
+</script>
+</body>
+</html>
