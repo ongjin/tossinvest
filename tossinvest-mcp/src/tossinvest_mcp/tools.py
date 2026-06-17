@@ -304,7 +304,7 @@ def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
             "error": str(e), "orderId": spec.modify_order_id,
             "clientOrderId": spec.client_order_id,
         })
-        raise  # token NOT released -> idempotent retry reuses same clientOrderId
+        raise  # token NOT finalized -> idempotent retry reuses same clientOrderId
 
     delta = spec.notional - (spec.prev_notional or Decimal("0"))
     app.safety.finalize(confirmation_token, delta)  # pop + accrue signed delta (floored)
