@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     deny_symbols: list[str] = []
     enforce_market_hours: bool = True
 
+    max_order_amount_usd: Decimal = Decimal("1000")
+    daily_order_limit_usd: Decimal = Decimal("5000")
+
     # paper engine
     paper_starting_cash: Decimal = Decimal("10000000")
 
@@ -38,7 +41,8 @@ class Settings(BaseSettings):
     audit_log_path: str = "tossinvest-mcp-audit.log"
 
     @field_validator(
-        "max_order_amount", "daily_order_limit", "paper_starting_cash", mode="before"
+        "max_order_amount", "daily_order_limit", "paper_starting_cash",
+        "max_order_amount_usd", "daily_order_limit_usd", mode="before",
     )
     @classmethod
     def _no_float(cls, v):

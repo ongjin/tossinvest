@@ -144,3 +144,20 @@ def test_build_spec_rejects_nonpositive_order_amount():
     with pytest.raises(GuardrailError) as e:
         m.build_spec(symbol="AAPL", side="BUY", order_type="MARKET", order_amount="0")
     assert e.value.code == "invalid-order-value"
+
+
+from tossinvest_mcp.safety import order_currency
+
+
+def test_order_currency_alpha_is_usd_numeric_is_krw():
+    assert order_currency("AAPL") == "USD"
+    assert order_currency("005930") == "KRW"
+
+
+def test_build_spec_sets_currency_and_modify_id():
+    m = _mgr()
+    krw = m.build_spec(symbol="005930", side="BUY", order_type="LIMIT", quantity="1", price="70000")
+    usd = m.build_spec(symbol="AAPL", side="BUY", order_type="MARKET", order_amount="100",
+                       modify_order_id="ord-9")
+    assert krw.currency == "KRW" and krw.modify_order_id is None
+    assert usd.currency == "USD" and usd.modify_order_id == "ord-9"

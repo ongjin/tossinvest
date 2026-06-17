@@ -44,3 +44,15 @@ def test_read_only_mode():
     s = _settings(mode="read_only")
     assert s.use_paper is False
     assert s.is_live is False
+
+
+def test_usd_caps_default_and_decimal():
+    s = _settings()
+    assert s.max_order_amount_usd == Decimal("1000")
+    assert s.daily_order_limit_usd == Decimal("5000")
+    assert isinstance(s.max_order_amount_usd, Decimal)
+
+
+def test_usd_caps_reject_float():
+    with pytest.raises(Exception):
+        _settings(max_order_amount_usd=1000.5)

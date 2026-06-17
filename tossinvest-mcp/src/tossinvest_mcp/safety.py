@@ -14,6 +14,11 @@ HIGH_VALUE_THRESHOLD = Decimal("100000000")    # 1억 KRW: requires explicit con
 MAX_ORDER_THRESHOLD = Decimal("3000000000")    # 30억 KRW: always rejected
 
 
+def order_currency(symbol: str) -> str:
+    """Order currency by symbol shape: alphabetic = USD, numeric = KRW (no FX)."""
+    return "USD" if symbol.isalpha() else "KRW"
+
+
 class GuardrailError(Exception):
     """An order rejected by a client-side safety guardrail (code-based)."""
 
@@ -35,6 +40,8 @@ class OrderSpec:
     confirm_high_value_order: bool
     notional: Decimal
     client_order_id: str
+    currency: str
+    modify_order_id: "str | None" = None
 
 
 @dataclass
@@ -72,6 +79,7 @@ class SafetyManager:
         time_in_force: str = "DAY",
         confirm_high_value_order: bool = False,
         ref_price: "str | None" = None,
+        modify_order_id: "str | None" = None,
     ) -> OrderSpec:
         for label, val in (("quantity", quantity), ("price", price), ("order_amount", order_amount)):
             if val is not None and to_decimal(val) <= 0:
@@ -93,7 +101,8 @@ class SafetyManager:
             symbol=symbol, side=side, order_type=order_type, quantity=quantity,
             price=price, order_amount=order_amount, time_in_force=time_in_force,
             confirm_high_value_order=confirm_high_value_order, notional=notional,
-            client_order_id=self._gen_id(),
+            client_order_id=self._gen_id(), currency=order_currency(symbol),
+            modify_order_id=modify_order_id,
         )
 
     def check_guardrails(
