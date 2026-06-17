@@ -179,8 +179,18 @@ API 가 사전신청 단계라 **라이브 의존 없이 전부 테스트 가능
 
 - **네이밍**: `pytossinvest` / `tossinvest-mcp` 는 잠정. **"비공식(unofficial) 클라이언트"임을 명시**(토스 상표/엔도르스먼트 오해 방지)하고 PyPI 이름 가용성·상표 마찰을 출시 전 확인.
 - **정식 API 키**: 사전신청 → 발급 후에야 `@live` 계약 테스트 가능. 그 전까지 fixture 가 스펙과 어긋날 리스크 → openapi.json 을 source of truth 로 주기적 재확인.
-- **라이선스**: MIT 예정(OSS 평판·채택 우선). 확정 필요.
 - **패키징 도구**: uv 워크스페이스(hatch 빌드) 가정. 확정 필요.
+
+---
+
+## 9. 라이선스 (듀얼)
+
+모노레포지만 패키지별로 라이선스를 나눈다:
+
+- **`pytossinvest` (SDK)** — **MIT**. 채택 마찰 최소화. SDK 는 어디든 끼워 쓸 수 있게.
+- **`tossinvest-mcp` (MCP 서버)** — **Apache 2.0**. 특허 보호조항(grant/retaliation) 포함.
+
+루트에 `LICENSE`(MIT)·`LICENSE-APACHE` 를 두고, 각 패키지 디렉터리에 해당 라이선스 파일과 `pyproject.toml` 의 `license` 필드를 명시. README 에 "SDK=MIT, MCP=Apache-2.0" 를 분명히 표기.
 
 ---
 
