@@ -78,3 +78,15 @@ def test_cancel_live_calls_client(app_factory, fake_client):
     out = T.cancel_order(app, "real-1")
     assert out["orderId"] == "real-3"
     assert ("cancel_order", "real-1") in fake_client.calls
+
+
+def test_place_market_paper_no_ref_price_errors_without_corruption(app_factory, fake_client):
+    app = app_factory(mode="paper")
+    pv = T.preview_order(app, symbol="005930", side="BUY", order_type="MARKET", quantity="10")
+    # market data momentarily unavailable at place time (it was available at preview)
+    fake_client.get_prices = lambda symbols: []
+    with pytest.raises(PaperError):
+        T.place_order(app, confirmation_token=pv["confirmationToken"])
+    # no corrupt zero-price fill happened
+    assert app.paper.positions == {}
+    assert str(app.paper.cash) == "10000000"

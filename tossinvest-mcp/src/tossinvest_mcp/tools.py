@@ -188,7 +188,12 @@ def place_order(app: AppContext, *, confirmation_token: str) -> dict:
                 fill_price = spec.price
                 qty = spec.quantity
             else:
-                fill_price = _ref_price(app, spec.symbol) or "0"
+                from .paper import PaperError
+                fill_price = _ref_price(app, spec.symbol)
+                if not fill_price or to_decimal(fill_price) <= 0:
+                    raise PaperError(
+                        f"no reference price available for MARKET fill of {spec.symbol}; retry"
+                    )
                 if spec.quantity is not None:
                     qty = spec.quantity
                 else:  # US amount-based: qty = amount / price
