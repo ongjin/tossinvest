@@ -25,7 +25,11 @@ def is_market_open(calendar: "dict | None", now_kst: datetime, country: str) -> 
     start, end = session.get("startTime"), session.get("endTime")
     if not start or not end:
         return False
-    start_t, end_t, now_t = _parse_hhmm(start), _parse_hhmm(end), now_kst.time()
+    try:
+        start_t, end_t = _parse_hhmm(start), _parse_hhmm(end)
+    except (ValueError, IndexError):
+        return False  # malformed time string -> treat as closed (safe default)
+    now_t = now_kst.time()
     if start_t <= end_t:
         return start_t <= now_t < end_t
     # wraps past midnight (US session stated in KST)

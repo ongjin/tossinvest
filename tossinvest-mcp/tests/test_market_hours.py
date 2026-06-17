@@ -38,3 +38,8 @@ def test_us_session_read_from_regular_market():
 def test_unknown_shape_is_closed():
     assert is_market_open({}, _kst(10, 0), "KR") is False
     assert is_market_open(None, _kst(10, 0), "KR") is False
+
+
+def test_malformed_time_is_closed():
+    bad = {"today": {"integrated": {"regularMarket": {"startTime": "garbage", "endTime": "15:30"}}}}
+    assert is_market_open(bad, _kst(10, 0), "KR") is False
