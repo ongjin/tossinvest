@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-Apache--2.0-d22128)
-![tests](https://img.shields.io/badge/tests-98%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-109%20passing-2ea44f)
 ![status](https://img.shields.io/badge/Toss%20API-pre--launch-f0ad4e)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -152,7 +152,7 @@ place_order(confirmation_token) ────────────┘
 
 > **일일 한도 재검사**: 일일 누적(`_spent`)은 place **성공 시점**에만 증가합니다. 그래서 `place_order` 는 `consume` 직후·실행 전에 금액 가드레일(주문당·일일)을 **다시** 검사합니다 — preview 를 여러 번 받아 모았다가 한꺼번에 place 해 한도를 넘기는 우회를 막습니다.
 >
-> **정정(modify)도 같은 토큰 게이트**: `preview_modify` 가 원주문을 조회해 정정 후 주문을 만들고 가드레일을 통과한 뒤 토큰을 발급, `modify_order(confirmation_token)` 가 실행합니다. 정정은 *기존 주문 금액의 변경*이라 일일 누적엔 가산하지 않되(주문당 상한이 매 정정을 묶음), 주문당·고액·하드실링 게이트는 정정 후 notional 에 적용됩니다.
+> **정정(modify)도 같은 토큰 게이트**: `preview_modify` 가 원주문을 조회해 정정 후 주문을 만들고 가드레일을 통과한 뒤 토큰을 발급, `modify_order(confirmation_token)` 가 실행합니다. 정정은 *기존 주문 금액의 변경*이라 일일 누적엔 증분(`new−old`)만 가산하고, 주문당·고액·하드실링 게이트는 정정 후 notional 전액에 적용됩니다.
 
 > notional(주문금액) 계산 우선순위: `order_amount` → `price × quantity` → `ref_price × quantity`(MARKET 추정가). 셋 다 불가능하면 `insufficient-order-params`, `order_amount` 를 `price`/`quantity` 와 **함께** 주면 `invalid-order-params` 로 거부합니다. `quantity`·`price`·`order_amount` 가 **0 이하면** `invalid-order-value`(음수 notional 이 상한을 통과하던 구멍 차단).
 
@@ -181,14 +181,14 @@ place_order(confirmation_token) ────────────┘
 - **paper modify/cancel 은 live 전용** — paper 는 즉시체결 모델이라 정정/취소할 미체결 주문이 없습니다. paper 에선 `preview_modify`·`cancel_order` 가 `PaperError` 로 명확히 거부(실제 `409 already-filled` 미러링).
 - **paper MARKET 무가격 체결 금지** — 체결 시점에 참조가(ref price)가 비면 가격 0 으로 조용히 체결되던 버그를 막았습니다. ref price 없으면 `PaperError`(토큰 살려둠 → 재시도 가능). US 금액주문은 `qty = order_amount / fill_price`(Decimal 나눗셈).
 - **장운영시간 US 자정넘김** — 미국장을 KST 로 표기하면 23:30→06:00 처럼 자정을 넘깁니다. `start > end` 면 wrap 윈도우(`now >= start or now < end`)로 처리. 깨진 시간 문자열은 "닫힘"으로 안전 처리. 종목 코드가 영문자면 `US`, 아니면 `KR` 로 캘린더 조회.
-- **감사 로그** — 모든 write 결정(`previewed`/`placed`/`modify_previewed`/`modified`/`canceled`/`error`)을 `AUDIT_LOG_PATH` 에 **JSONL(append-only)** 로 기록합니다(UTC 타임스탬프). 신뢰·디버그·기록 용도. `placed` 레코드엔 `notional`·`currency` 가 들어가 **재시작 시 일일 누적 복원(replay)** 에 쓰이고, `modify_previewed`·`canceled` 엔 **정정/취소 전 원주문 상태**가 남습니다.
+- **감사 로그** — 모든 write 결정(`previewed`/`placed`/`modify_previewed`/`modified`/`canceled`/`error`)을 `AUDIT_LOG_PATH` 에 **JSONL(append-only)** 로 기록합니다(UTC 타임스탬프). 신뢰·디버그·기록 용도. `placed`·`modified` 레코드엔 `notional`·`currency` 가 들어가 **재시작 시 일일 누적 복원(replay)** 에 쓰이고(`modified` 는 delta 기록), `modify_previewed`·`canceled` 엔 **정정/취소 전 원주문 상태**가 남습니다.
 
 ---
 
 ## 테스트
 
 ```bash
-uv run --package tossinvest-mcp pytest tossinvest-mcp/tests   # 98 passing
+uv run --package tossinvest-mcp pytest tossinvest-mcp/tests   # 109 passing
 ```
 
 `FakeClient` + paper 엔진으로 검증 — **라이브 키 불필요, 네트워크 0**. 무거운 로직(가드레일·토큰·paper·market_hours·audit)은 pure 모듈로 분리해 직접 단위테스트하고, `server.py` 는 모드별 **툴 등록 여부**만 검증합니다(MCP 트랜스포트 내부에 의존 안 함).

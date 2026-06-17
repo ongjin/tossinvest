@@ -187,7 +187,7 @@ class SafetyManager:
         )
 
     def restore_spend(self, events: list[dict]) -> None:
-        """Rebuild today's per-currency spend from prior 'placed' audit events (UTC ts -> KST date)."""
+        """Rebuild today's per-currency spend from prior 'placed'/'modified' audit events (UTC ts -> KST date)."""
         self._roll_daily()
         today = self._today()
         for ev in events:
