@@ -65,15 +65,25 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 
 ## 추가 문서 (docs/)
 
-특정 작업 들어갈 때 아래를 직접 읽어와서 참고.
+특정 작업 들어갈 때 아래를 직접 읽어와서 참고. `docs/claude/*` = **지금 어떻게 동작하나 / 어떻게 작업하나**(living, 자가갱신), `docs/superpowers/*` = **설계 시점 기록**(spec·plan, 고정).
 
-- [docs/claude/tossinvest-open-api.md](docs/claude/tossinvest-open-api.md) — **토스증권 Open API 레퍼런스 (코어)**. 인증 2단(`X-Tossinvest-Account`)·엔드포인트 전체·요청/응답 스키마·enum·rate limit 10그룹·에러코드 전체표·주문 함정(멱등성 10분·고액확인·US 금액주문·OrderStatus 10종). SDK 엔드포인트 추가·MCP 툴·주문 로직 손대기 **전에** 읽는다.
-- [docs/superpowers/specs/2026-06-17-tossinvest-mcp-design.md](docs/superpowers/specs/2026-06-17-tossinvest-mcp-design.md) — **설계 확정본**. 모드 3단계·안전모델(§3)·툴 매핑(§4)·크로스커팅 인프라(§5)·테스트 전략(§6)·규제 메모(§7)·라이선스(§9). 무엇을 왜 이렇게 만들었나 궁금할 때.
-- [docs/superpowers/plans/2026-06-17-pytossinvest-sdk.md](docs/superpowers/plans/2026-06-17-pytossinvest-sdk.md) — **SDK 구현 플랜 (Plan 1)**. TDD 태스크별 코드. SDK 구조/패턴 참고.
-- [docs/superpowers/plans/2026-06-17-tossinvest-mcp-server.md](docs/superpowers/plans/2026-06-17-tossinvest-mcp-server.md) — **MCP 구현 플랜 (Plan 2)**. 모듈별 TDD 태스크·안전 불변식·테스트. MCP 구조 참고.
+**living (docs/claude/ — 코드 만지기 전 읽고, 만진 뒤 갱신):**
+- [docs/claude/tossinvest-open-api.md](docs/claude/tossinvest-open-api.md) — **토스 Open API 레퍼런스 (외부 스펙)**. 인증 2단(`X-Tossinvest-Account`)·엔드포인트 전체·요청/응답 스키마·enum·rate limit 10그룹·에러코드 전체표·주문 함정(멱등성 10분·고액확인·US 금액주문·OrderStatus 10종). 외부 API 사실관계가 필요할 때.
+- [docs/claude/pytossinvest-sdk.md](docs/claude/pytossinvest-sdk.md) — **SDK 내부구조**. 공개 API 표면(클라이언트·에러·모델·money), `_request` 오케스트레이션(언래핑·계좌헤더·401재시도·레이트게이트), 모듈별 책임·함정·v0.0.1 한계, 새 엔드포인트 추가 절차. `pytossinvest/` 코드 만질 때.
+- [docs/claude/tossinvest-mcp.md](docs/claude/tossinvest-mcp.md) — **MCP 내부구조 + 안전 불변식**. 3모드 라우팅표, 가드레일 순서, preview→place 토큰 생애·멱등성, 13툴, 모듈별 함정(paper 즉시체결·MARKET 무가격·US 자정넘김·conftest import), 새 툴 추가 절차. `tossinvest-mcp/` 코드 만질 때.
 
-## 🔄 문서 자가갱신 (lean 유지 — 꼭 지킬 것)
+**design history (docs/superpowers/ — 왜 이렇게 만들었나):**
+- [docs/superpowers/specs/2026-06-17-tossinvest-mcp-design.md](docs/superpowers/specs/2026-06-17-tossinvest-mcp-design.md) — **설계 확정본**. 모드 3단계·안전모델(§3)·툴 매핑(§4)·크로스커팅 인프라(§5)·테스트 전략(§6)·규제 메모(§7)·라이선스(§9).
+- [docs/superpowers/plans/2026-06-17-pytossinvest-sdk.md](docs/superpowers/plans/2026-06-17-pytossinvest-sdk.md) — **SDK 구현 플랜 (Plan 1)**. TDD 태스크별 코드.
+- [docs/superpowers/plans/2026-06-17-tossinvest-mcp-server.md](docs/superpowers/plans/2026-06-17-tossinvest-mcp-server.md) — **MCP 구현 플랜 (Plan 2)**. 모듈별 TDD 태스크·안전 불변식·테스트.
 
-- **작업 끝나면 동기화 (별도 요청 없이)**: 의미 있는 변경(새 모듈·엔드포인트·MCP 툴·모드·가드레일·새 함정·새 컨벤션/환경변수)은 **같은 세션에서** 이 `CLAUDE.md` 관련 섹션 + `docs/` 문서를 갱신한다. **커밋/푸시는 수동** (문서 갱신 ≠ 커밋). 자잘한 버그픽스·일회성 작업은 제외.
-- **토스 API 레퍼런스(`docs/claude/tossinvest-open-api.md`)는 스냅샷**: 코드 작업 중 canonical `openapi.json` 과 불일치(새 필드·엔드포인트·enum·함정)를 발견하면 **그 자리에서 그 문서를 갱신**한다. 권위 순서 ① openapi.json → ② developers.tossinvest.com/docs → ③ 본 문서.
+## 🔄 문서 자가갱신 (이 CLAUDE.md 포함 **모든** 상세문서 — 꼭 지킬 것)
+
+- **작업 끝나면 동기화 (별도 요청 없이)**: 의미 있는 변경(새 모듈·엔드포인트·MCP 툴·모드·가드레일·새 함정·새 컨벤션/환경변수)은 **같은 세션에서** **이 `CLAUDE.md` + 관련 `docs/claude/*` 문서**를 갱신한다. **커밋/푸시는 수동** (문서 갱신 ≠ 커밋). 자잘한 버그픽스·일회성 작업은 제외.
+- **자가갱신 대상 = CLAUDE.md + docs/claude/ 전부** (`docs/superpowers/*` 는 설계 시점 기록이라 고정 — 갱신 대상 아님). 무엇을 만졌으면 무엇을 갱신하나:
+  - SDK(`pytossinvest/`) → [docs/claude/pytossinvest-sdk.md](docs/claude/pytossinvest-sdk.md) (+ 공개 API 바뀌면 이 CLAUDE.md Conventions/함정)
+  - MCP(`tossinvest-mcp/`) → [docs/claude/tossinvest-mcp.md](docs/claude/tossinvest-mcp.md) (+ 모드·불변식·env 바뀌면 이 CLAUDE.md)
+  - 외부 토스 API 사실관계 → [docs/claude/tossinvest-open-api.md](docs/claude/tossinvest-open-api.md)
+  - 각 `docs/claude/*` 문서 상단엔 자체 `🔄 자가갱신` 문구가 있다(스냅샷·코드가 진실). 코드와 어긋난 걸 발견하면 그 자리에서 고친다.
+- **토스 API 레퍼런스는 스냅샷**: 권위 순서 ① canonical `openapi.json` → ② developers.tossinvest.com/docs → ③ 본 문서. 코드 작업 중 불일치 발견 시 즉시 그 문서 갱신.
 - **CLAUDE.md 는 high-signal 만** (CRITICAL RULES·Tech Stack·Structure·Commands·Conventions·함정·docs 인덱스). 한 주제가 길어지고 *특정 작업 시에만* 필요하면 `docs/claude/<topic>.md` 로 분할하고 본문엔 인덱스 한 줄만. 인덱스 hook(언제 읽나)이 부정확해지면 같이 고친다.
