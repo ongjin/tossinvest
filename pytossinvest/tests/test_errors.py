@@ -1,6 +1,7 @@
 from pytossinvest.errors import (
     TossInvestError,
     AuthError,
+    ForbiddenError,
     NotFoundError,
     ValidationError,
     ConflictError,
@@ -23,6 +24,7 @@ def _body(code, message="", data=None, request_id="01HXY"):
 def test_maps_status_to_class():
     assert isinstance(error_from_response(400, _body("invalid-request")), ValidationError)
     assert isinstance(error_from_response(401, _body("expired-token")), AuthError)
+    assert isinstance(error_from_response(403, _body("forbidden")), ForbiddenError)
     assert isinstance(error_from_response(404, _body("order-not-found")), NotFoundError)
     assert isinstance(error_from_response(409, _body("already-filled")), ConflictError)
     assert isinstance(error_from_response(422, _body("insufficient-buying-power")), BusinessRuleError)
