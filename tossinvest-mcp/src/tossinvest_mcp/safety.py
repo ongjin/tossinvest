@@ -73,6 +73,11 @@ class SafetyManager:
         confirm_high_value_order: bool = False,
         ref_price: "str | None" = None,
     ) -> OrderSpec:
+        for label, val in (("quantity", quantity), ("price", price), ("order_amount", order_amount)):
+            if val is not None and to_decimal(val) <= 0:
+                raise GuardrailError(
+                    "invalid-order-value", f"{label} must be a positive number, got {val!r}"
+                )
         if order_amount is not None:
             notional = to_decimal(order_amount)
         elif price is not None and quantity is not None:

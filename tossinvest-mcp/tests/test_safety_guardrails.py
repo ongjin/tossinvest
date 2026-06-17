@@ -123,3 +123,24 @@ def test_market_closed_rejected_when_enforced():
     with pytest.raises(GuardrailError) as e:
         m.check_guardrails(_spec(m), is_market_open=False, enforce_hours=True)
     assert e.value.code == "market-closed"
+
+
+def test_build_spec_rejects_nonpositive_quantity():
+    m = _mgr()
+    with pytest.raises(GuardrailError) as e:
+        m.build_spec(symbol="005930", side="BUY", order_type="LIMIT", quantity="0", price="70000")
+    assert e.value.code == "invalid-order-value"
+
+
+def test_build_spec_rejects_negative_price():
+    m = _mgr()
+    with pytest.raises(GuardrailError) as e:
+        m.build_spec(symbol="005930", side="BUY", order_type="LIMIT", quantity="10", price="-1")
+    assert e.value.code == "invalid-order-value"
+
+
+def test_build_spec_rejects_nonpositive_order_amount():
+    m = _mgr()
+    with pytest.raises(GuardrailError) as e:
+        m.build_spec(symbol="AAPL", side="BUY", order_type="MARKET", order_amount="0")
+    assert e.value.code == "invalid-order-value"
