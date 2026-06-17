@@ -132,6 +132,20 @@ def _ref_price(app: AppContext, symbol: str) -> "str | None":
     return str(prices[0].last_price) if prices else None
 
 
+def _price_and_currency(app: AppContext, symbol: str) -> "tuple[str | None, str | None]":
+    """One get_prices call -> (last_price, currency). Tolerates failure for graceful fallback."""
+    try:
+        prices = app.client.get_prices([symbol])
+    except Exception:
+        return None, None
+    if not prices:
+        return None, None
+    p = prices[0]
+    last = str(p.last_price) if p.last_price is not None else None
+    cur = (p.currency or "").strip() or None
+    return last, cur
+
+
 def get_order_readiness(app: AppContext, symbol: str, side: str = "BUY",
                         currency: str = "KRW") -> dict:
     if app.use_paper:
@@ -152,13 +166,12 @@ def preview_order(app: AppContext, *, symbol: str, side: str, order_type: str,
                   quantity: "str | None" = None, price: "str | None" = None,
                   order_amount: "str | None" = None, time_in_force: str = "DAY",
                   confirm_high_value_order: bool = False) -> dict:
-    ref = None
-    if order_type == "MARKET" and order_amount is None:
-        ref = _ref_price(app, symbol)
+    last, currency = _price_and_currency(app, symbol)
+    ref = last if (order_type == "MARKET" and order_amount is None) else None
     spec = app.safety.build_spec(
         symbol=symbol, side=side, order_type=order_type, quantity=quantity, price=price,
         order_amount=order_amount, time_in_force=time_in_force,
-        confirm_high_value_order=confirm_high_value_order, ref_price=ref,
+        confirm_high_value_order=confirm_high_value_order, ref_price=ref, currency=currency,
     )
     is_open, enforce = _market_gate(app, symbol)
     app.safety.check_guardrails(spec, is_market_open=is_open, enforce_hours=enforce)
@@ -241,19 +254,25 @@ def preview_modify(app: AppContext, order_id: str, *, order_type: str,
     side = original.get("side")
     merged_price = price if price is not None else original.get("price")
     merged_qty = quantity if quantity is not None else original.get("quantity")
+    _, currency = _price_and_currency(app, symbol)
     spec = app.safety.build_spec(
         symbol=symbol, side=side, order_type=order_type,
         quantity=merged_qty, price=merged_price,
         confirm_high_value_order=confirm_high_value_order, modify_order_id=order_id,
+        currency=currency,
     )
+    orig_price = original.get("price")
+    orig_qty = original.get("quantity")
+    if orig_price is not None and orig_qty is not None:
+        spec.prev_notional = to_decimal(orig_price) * to_decimal(orig_qty)
     is_open, enforce = _market_gate(app, symbol)
     app.safety.check_guardrails(spec, is_market_open=is_open, enforce_hours=enforce,
-                                check_daily=False)  # M1: per-order gated, no daily bucket
+                                check_daily=True, prev_notional=spec.prev_notional)
     token = app.safety.issue_token(spec)
     app.audit.record({
         "tool": "preview_modify", "mode": app.config.mode, "decision": "modify_previewed",
         "orderId": order_id, "previousStatus": original.get("status"),
-        "symbol": symbol, "side": side, "notional": spec.notional,
+        "symbol": symbol, "side": side, "notional": spec.notional, "currency": spec.currency,
         "clientOrderId": spec.client_order_id, "token": token,
     })
     return {
@@ -270,8 +289,9 @@ def preview_modify(app: AppContext, order_id: str, *, order_type: str,
 
 def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
     spec = app.safety.consume(confirmation_token)  # validates exists + not expired
-    # re-check amount guardrails on the amended order (M1: no daily bucket add/check)
-    app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
+    # re-check amount guardrails on the amended order against the delta (M1: delta accounting)
+    app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False,
+                                check_daily=True, prev_notional=spec.prev_notional)
     try:
         result = app.client.modify_order(
             spec.modify_order_id, order_type=spec.order_type,
@@ -284,13 +304,15 @@ def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
             "error": str(e), "orderId": spec.modify_order_id,
             "clientOrderId": spec.client_order_id,
         })
-        raise  # token NOT released -> idempotent retry reuses same clientOrderId
+        raise  # token NOT finalized -> idempotent retry reuses same clientOrderId
 
-    app.safety.release(confirmation_token)  # pop only, no daily accrual (M1)
+    delta = spec.notional - (spec.prev_notional or Decimal("0"))
+    app.safety.finalize(confirmation_token, delta)  # pop + accrue signed delta (floored)
     app.audit.record({
         "tool": "modify_order", "mode": app.config.mode, "decision": "modified",
         "orderId": spec.modify_order_id, "result": result,
         "clientOrderId": spec.client_order_id,
+        "notional": delta, "currency": spec.currency,
     })
     return result
 

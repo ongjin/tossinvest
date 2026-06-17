@@ -54,6 +54,7 @@ class OrderSpec:
     client_order_id: str
     currency: str
     modify_order_id: "str | None" = None
+    prev_notional: "Decimal | None" = None
 
 
 @dataclass
@@ -93,6 +94,7 @@ class SafetyManager:
         confirm_high_value_order: bool = False,
         ref_price: "str | None" = None,
         modify_order_id: "str | None" = None,
+        currency: "str | None" = None,
     ) -> OrderSpec:
         for label, val in (("quantity", quantity), ("price", price), ("order_amount", order_amount)):
             if val is not None and to_decimal(val) <= 0:
@@ -119,13 +121,13 @@ class SafetyManager:
             symbol=symbol, side=side, order_type=order_type, quantity=quantity,
             price=price, order_amount=order_amount, time_in_force=time_in_force,
             confirm_high_value_order=confirm_high_value_order, notional=notional,
-            client_order_id=self._gen_id(), currency=order_currency(symbol),
+            client_order_id=self._gen_id(), currency=currency if currency is not None else order_currency(symbol),
             modify_order_id=modify_order_id,
         )
 
     def check_guardrails(
         self, spec: OrderSpec, *, is_market_open: bool, enforce_hours: bool,
-        check_daily: bool = True,
+        check_daily: bool = True, prev_notional: "Decimal | None" = None,
     ) -> None:
         cfg = self._cfg
         if spec.currency == "USD":
@@ -160,7 +162,8 @@ class SafetyManager:
             )
         if check_daily:
             self._roll_daily()
-            if self._spent[spec.currency] + spec.notional > daily_cap:
+            increment = spec.notional if prev_notional is None else spec.notional - prev_notional
+            if self._spent[spec.currency] + increment > daily_cap:
                 raise GuardrailError(
                     "daily-limit",
                     f"this order would push today's {spec.currency} total over {daily_cap}",
@@ -179,14 +182,16 @@ class SafetyManager:
 
     def record_spend(self, notional: Decimal, currency: str = "KRW") -> None:
         self._roll_daily()
-        self._spent[currency] = self._spent.get(currency, Decimal("0")) + notional
+        self._spent[currency] = max(
+            Decimal("0"), self._spent.get(currency, Decimal("0")) + notional
+        )
 
     def restore_spend(self, events: list[dict]) -> None:
-        """Rebuild today's per-currency spend from prior 'placed' audit events (UTC ts -> KST date)."""
+        """Rebuild today's per-currency spend from prior 'placed'/'modified' audit events (UTC ts -> KST date)."""
         self._roll_daily()
         today = self._today()
         for ev in events:
-            if not isinstance(ev, dict) or ev.get("decision") != "placed":
+            if not isinstance(ev, dict) or ev.get("decision") not in ("placed", "modified"):
                 continue
             notional = ev.get("notional")
             ts = ev.get("ts")
@@ -201,6 +206,8 @@ class SafetyManager:
                 continue
             currency = ev.get("currency", "KRW")
             self._spent[currency] = self._spent.get(currency, Decimal("0")) + amount
+        for cur in self._spent:
+            self._spent[cur] = max(Decimal("0"), self._spent[cur])
 
     def issue_token(self, spec: OrderSpec) -> str:
         token = self._gen_id()
@@ -235,7 +242,3 @@ class SafetyManager:
         pending = self._pending.pop(token, None)
         currency = pending.spec.currency if pending else "KRW"
         self.record_spend(notional, currency)
-
-    def release(self, token: str) -> None:
-        """Drop a pending token without recording spend (modify: per-order gated, no daily bucket)."""
-        self._pending.pop(token, None)
