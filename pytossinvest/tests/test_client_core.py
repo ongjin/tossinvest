@@ -148,3 +148,44 @@ def test_200_deeply_nested_json_raises_invalid_response():
     with pytest.raises(TossInvestError) as exc:
         c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
     assert exc.value.code == "invalid-response"
+
+
+@respx.mock
+def test_syncs_bucket_from_ratelimit_headers():
+    _token_route()
+    respx.get(f"{BASE}/api/v1/prices").mock(return_value=httpx.Response(
+        200, json={"result": []},
+        headers={"X-RateLimit-Limit": "20", "X-RateLimit-Remaining": "5", "X-RateLimit-Reset": "2"},
+    ))
+    c = _client()
+    c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
+    b = c._buckets["MARKET_DATA"]
+    assert b.capacity == 20.0
+    assert b.refill_per_sec == 0.5          # 1 / Reset(2)
+    assert b._tokens <= 5.0                  # clamped down to Remaining
+
+
+@respx.mock
+def test_no_ratelimit_headers_keeps_static_rate():
+    _token_route()
+    respx.get(f"{BASE}/api/v1/prices").mock(return_value=httpx.Response(200, json={"result": []}))
+    c = _client()
+    c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
+    c._gate("MARKET_DATA")                   # no header seen -> static default applies
+    assert c._buckets["MARKET_DATA"].capacity == 10
+
+
+@respx.mock
+def test_header_rate_overrides_peak_halving():
+    from datetime import datetime
+    _token_route()
+    respx.post(f"{BASE}/api/v1/orders").mock(return_value=httpx.Response(
+        200, json={"result": {"orderId": "1"}},
+        headers={"X-RateLimit-Limit": "6", "X-RateLimit-Remaining": "6", "X-RateLimit-Reset": "1"},
+    ))
+    peak = datetime(2026, 6, 17, 9, 5)       # inside 09:00-09:10 peak window
+    c = TossInvestClient("cid", "secret", base_url=BASE, sleep=lambda s: None, now_kst=lambda: peak)
+    c._account_seq = 1
+    c._request("POST", "/api/v1/orders", group="ORDER", account=True, json={})
+    c._gate("ORDER")                         # header seen -> must NOT re-halve 6 to 3
+    assert c._buckets["ORDER"].capacity == 6.0

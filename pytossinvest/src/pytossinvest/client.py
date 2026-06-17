@@ -53,6 +53,7 @@ class TossInvestClient:
             for g, r in _GROUP_RATES.items()
         }
         self._account_seq: int | None = None
+        self._rate_from_header: dict[str, bool] = {}
 
     def close(self) -> None:
         self._http.close()
@@ -67,12 +68,38 @@ class TossInvestClient:
         bucket = self._buckets.get(group)
         if bucket is None:
             return
-        # Apply peak-hour halving (09:00-09:10 KST for ORDER/ORDER_INFO).
-        rate = effective_rate(group, _GROUP_RATES[group], self._now_kst())
-        bucket.capacity = rate
-        bucket.refill_per_sec = rate
+        # Once the server's X-RateLimit-* headers have been seen for this group, they are
+        # the source of truth (they already reflect the 09:00-09:10 peak halving), so don't
+        # re-apply the static effective_rate. Until then, use the documented default.
+        if not self._rate_from_header.get(group):
+            rate = effective_rate(group, _GROUP_RATES[group], self._now_kst())
+            bucket.capacity = rate
+            bucket.refill_per_sec = rate
         while not bucket.try_acquire():
             self._sleep(bucket.time_until_available())
+
+    def _sync_bucket_from_headers(self, group: str, headers) -> None:
+        """Reconcile a group's bucket to the server's X-RateLimit-* headers (source of truth).
+        No-op if any header is absent or unparseable."""
+        bucket = self._buckets.get(group)
+        if bucket is None:
+            return
+        limit = headers.get("X-RateLimit-Limit")
+        remaining = headers.get("X-RateLimit-Remaining")
+        reset = headers.get("X-RateLimit-Reset")
+        if limit is None or remaining is None or reset is None:
+            return
+        try:
+            limit_f = float(limit)
+            remaining_f = float(remaining)
+            reset_f = float(reset)
+        except (TypeError, ValueError):
+            return
+        bucket.capacity = limit_f
+        if reset_f > 0:
+            bucket.refill_per_sec = 1.0 / reset_f
+        bucket._tokens = min(bucket._tokens, remaining_f)
+        self._rate_from_header[group] = True
 
     def _request(
         self,
@@ -96,6 +123,7 @@ class TossInvestClient:
         resp = self._http.request(
             method, path, params=params, json=json, data=data, headers=headers
         )
+        self._sync_bucket_from_headers(group, resp.headers)
 
         if resp.status_code == 200:
             try:
