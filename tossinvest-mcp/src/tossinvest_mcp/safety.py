@@ -92,6 +92,11 @@ class SafetyManager:
                 raise GuardrailError(
                     "invalid-order-value", f"{label} must be a positive number, got {val!r}"
                 )
+        if order_amount is not None and (price is not None or quantity is not None):
+            raise GuardrailError(
+                "invalid-order-params",
+                "order_amount cannot be combined with price or quantity",
+            )
         if order_amount is not None:
             notional = to_decimal(order_amount)
         elif price is not None and quantity is not None:
@@ -126,9 +131,10 @@ class SafetyManager:
             hard_ceiling = MAX_ORDER_THRESHOLD
             per_order_cap = to_decimal(cfg.max_order_amount)
             daily_cap = to_decimal(cfg.daily_order_limit)
-        if cfg.deny_symbols and spec.symbol in cfg.deny_symbols:
+        sym = spec.symbol.strip().upper()
+        if cfg.deny_symbols and sym in {s.strip().upper() for s in cfg.deny_symbols}:
             raise GuardrailError("symbol-denied", f"{spec.symbol} is in the deny list")
-        if cfg.allow_symbols and spec.symbol not in cfg.allow_symbols:
+        if cfg.allow_symbols and sym not in {s.strip().upper() for s in cfg.allow_symbols}:
             raise GuardrailError("symbol-not-allowed", f"{spec.symbol} is not in the allow list")
         if spec.notional > hard_ceiling:
             raise GuardrailError(

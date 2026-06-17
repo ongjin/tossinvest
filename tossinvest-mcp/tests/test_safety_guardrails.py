@@ -215,3 +215,32 @@ def test_check_daily_false_skips_daily_gate():
     spec = _spec(m, quantity="10", price="70000")  # +700,000 -> over 1,000,000
     # default would raise daily-limit; check_daily=False skips it (other gates still run)
     m.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
+
+
+def test_build_spec_rejects_order_amount_with_price():
+    m = _mgr()
+    with pytest.raises(GuardrailError) as e:
+        m.build_spec(symbol="AAPL", side="BUY", order_type="LIMIT",
+                     order_amount="100", price="1000000", quantity="1000")
+    assert e.value.code == "invalid-order-params"
+
+
+def test_build_spec_rejects_order_amount_with_quantity():
+    m = _mgr()
+    with pytest.raises(GuardrailError) as e:
+        m.build_spec(symbol="AAPL", side="BUY", order_type="MARKET",
+                     order_amount="100", quantity="1000")
+    assert e.value.code == "invalid-order-params"
+
+
+def test_deny_list_matches_whitespace_and_case_insensitive():
+    m = _mgr(deny_symbols=["AAPL"])
+    with pytest.raises(GuardrailError) as e:
+        _ok(m, _spec(m, symbol=" aapl "))  # evasion attempt
+    assert e.value.code == "symbol-denied"
+
+
+def test_allow_list_normalizes_symbol():
+    m = _mgr(allow_symbols=["aapl"], max_order_amount_usd="999999999",
+             daily_order_limit_usd="999999999")  # config lowercase
+    _ok(m, _spec(m, symbol="AAPL"))       # must pass (normalized match)
