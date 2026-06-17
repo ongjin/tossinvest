@@ -159,3 +159,38 @@ def test_cancel_records_previous_status(app_factory, fake_client):
     entry = json.loads(lines[-1])
     assert entry["decision"] == "canceled"
     assert entry["previousStatus"] == "PENDING"
+
+
+def test_preview_uses_authoritative_currency_from_api(app_factory, fake_client):
+    app = app_factory(mode="paper")
+    from pytossinvest.models import Price
+    # numeric symbol that the API says is actually USD-denominated
+    fake_client.get_prices = lambda symbols: [
+        Price.model_validate({"symbol": symbols[0], "lastPrice": "100", "currency": "USD"})
+    ]
+    pv = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                         quantity="1", price="100")
+    T.place_order(app, confirmation_token=pv["confirmationToken"])
+    placed = [json.loads(l) for l in open(app.config.audit_log_path, encoding="utf-8")
+              if json.loads(l)["decision"] == "placed"][0]
+    assert placed["currency"] == "USD"  # authoritative, not symbol-shape KRW
+
+
+def test_preview_falls_back_to_symbol_shape_when_price_lookup_fails(app_factory, fake_client):
+    app = app_factory(mode="paper")
+    def boom(symbols):
+        raise RuntimeError("market data down")
+    fake_client.get_prices = boom
+    pv = T.preview_order(app, symbol="AAPL", side="BUY", order_type="LIMIT",
+                         quantity="1", price="100")
+    T.place_order(app, confirmation_token=pv["confirmationToken"])
+    placed = [json.loads(l) for l in open(app.config.audit_log_path, encoding="utf-8")
+              if json.loads(l)["decision"] == "placed"][0]
+    assert placed["currency"] == "USD"  # AAPL -> symbol-shape fallback
+
+
+def test_market_preview_uses_single_price_call(app_factory, fake_client):
+    app = app_factory(mode="paper")
+    pv = T.preview_order(app, symbol="005930", side="BUY", order_type="MARKET", quantity="10")
+    n = sum(1 for c in fake_client.calls if c[0] == "get_prices")
+    assert n == 1  # currency + ref price share one call
