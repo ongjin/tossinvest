@@ -35,3 +35,18 @@ def test_creates_parent_dir(tmp_path):
     path = tmp_path / "nested" / "dir" / "audit.log"
     AuditLog(path, now=_fixed_clock).record({"tool": "x"})
     assert path.exists()
+
+
+def test_read_events_parses_and_skips_blank(tmp_path):
+    path = tmp_path / "audit.log"
+    log = AuditLog(path, now=_fixed_clock)
+    log.record({"tool": "place_order", "decision": "placed",
+                "notional": Decimal("70000"), "currency": "KRW"})
+    log.record({"tool": "preview_order", "decision": "previewed"})
+    events = log.read_events()
+    assert [e["decision"] for e in events] == ["placed", "previewed"]
+    assert events[0]["notional"] == "70000"  # serialized as string
+
+
+def test_read_events_missing_file_is_empty(tmp_path):
+    assert AuditLog(tmp_path / "nope.log").read_events() == []

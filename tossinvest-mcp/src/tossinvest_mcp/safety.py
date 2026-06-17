@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 from typing import Callable
 
 from pytossinvest.money import to_decimal
 
 from .config import Settings
+
+_KST = ZoneInfo("Asia/Seoul")
 
 HIGH_VALUE_THRESHOLD = Decimal("100000000")    # 1억 KRW: requires explicit confirm
 MAX_ORDER_THRESHOLD = Decimal("3000000000")    # 30억 KRW: always rejected
@@ -164,6 +167,26 @@ class SafetyManager:
     def record_spend(self, notional: Decimal, currency: str = "KRW") -> None:
         self._roll_daily()
         self._spent[currency] = self._spent.get(currency, Decimal("0")) + notional
+
+    def restore_spend(self, events: list[dict]) -> None:
+        """Rebuild today's per-currency spend from prior 'placed' audit events (UTC ts -> KST date)."""
+        self._roll_daily()
+        today = self._today()
+        for ev in events:
+            if ev.get("decision") != "placed":
+                continue
+            notional = ev.get("notional")
+            ts = ev.get("ts")
+            if notional is None or ts is None:
+                continue
+            try:
+                ev_date = datetime.fromisoformat(ts).astimezone(_KST).date()
+            except (ValueError, TypeError):
+                continue
+            if ev_date != today:
+                continue
+            currency = ev.get("currency", "KRW")
+            self._spent[currency] = self._spent.get(currency, Decimal("0")) + to_decimal(notional)
 
     def issue_token(self, spec: OrderSpec) -> str:
         token = self._gen_id()

@@ -24,6 +24,7 @@ def build_app_context(settings: Settings, *, client) -> AppContext:
         today=lambda: datetime.now(_KST).date(),
     )
     audit = AuditLog(settings.audit_log_path)
+    safety.restore_spend(audit.read_events())  # rebuild today's spend across restarts
     return AppContext(
         config=settings, client=client, paper=paper, safety=safety, audit=audit,
         now_kst=lambda: datetime.now(_KST),

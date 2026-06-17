@@ -23,3 +23,19 @@ class AuditLog:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+
+    def read_events(self) -> list[dict]:
+        """Parse the JSONL audit file into events (missing file -> [], bad lines skipped)."""
+        if not self._path.exists():
+            return []
+        events: list[dict] = []
+        with self._path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except ValueError:
+                    continue
+        return events

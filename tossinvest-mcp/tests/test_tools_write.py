@@ -92,6 +92,17 @@ def test_place_market_paper_no_ref_price_errors_without_corruption(app_factory, 
     assert str(app.paper.cash) == "10000000"
 
 
+def test_place_audit_records_currency_and_notional(app_factory):
+    app = app_factory(mode="paper")
+    pv = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                         quantity="10", price="70000")
+    T.place_order(app, confirmation_token=pv["confirmationToken"])
+    lines = open(app.config.audit_log_path, encoding="utf-8").read().strip().splitlines()
+    placed = [json.loads(l) for l in lines if json.loads(l)["decision"] == "placed"][0]
+    assert placed["currency"] == "KRW"
+    assert placed["notional"] == "700000"
+
+
 def test_place_rechecks_daily_limit_after_other_fill(app_factory):
     app = app_factory(mode="paper", daily_order_limit="1000000", max_order_amount="1000000")
     pv1 = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",

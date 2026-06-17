@@ -115,3 +115,18 @@ def test_release_pops_without_recording_spend():
     with pytest.raises(GuardrailError) as e:
         m.consume(token)  # token gone
     assert e.value.code == "invalid-confirmation"
+
+
+def test_restore_spend_sums_todays_placed_by_currency():
+    s = Settings(_env_file=None)
+    m = SafetyManager(s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17))
+    events = [
+        {"ts": "2026-06-17T01:00:00+00:00", "decision": "placed", "notional": "700000", "currency": "KRW"},
+        {"ts": "2026-06-16T20:00:00+00:00", "decision": "placed", "notional": "300000", "currency": "KRW"},  # UTC yday -> KST 05:00 06-17 = today
+        {"ts": "2026-06-16T10:00:00+00:00", "decision": "placed", "notional": "999999", "currency": "KRW"},  # KST 19:00 06-16 = yesterday -> skip
+        {"ts": "2026-06-17T02:00:00+00:00", "decision": "placed", "notional": "100", "currency": "USD"},
+        {"ts": "2026-06-17T03:00:00+00:00", "decision": "previewed", "notional": "50000", "currency": "KRW"},  # not placed -> skip
+    ]
+    m.restore_spend(events)
+    assert m._spent["KRW"] == Decimal("1000000")  # 700,000 + 300,000
+    assert m._spent["USD"] == Decimal("100")

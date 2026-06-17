@@ -225,6 +225,7 @@ def place_order(app: AppContext, *, confirmation_token: str) -> dict:
     app.audit.record({
         "tool": "place_order", "mode": app.config.mode, "decision": "placed",
         "result": result, "clientOrderId": spec.client_order_id,
+        "currency": spec.currency, "notional": spec.notional,
     })
     return result
 
