@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 
 from tossinvest_mcp.config import Settings
-from tossinvest_mcp.safety import SafetyManager, GuardrailError
+from tossinvest_mcp.safety import SafetyManager, GuardrailError, order_currency
 
 
 def _ids():
@@ -144,9 +144,6 @@ def test_build_spec_rejects_nonpositive_order_amount():
     with pytest.raises(GuardrailError) as e:
         m.build_spec(symbol="AAPL", side="BUY", order_type="MARKET", order_amount="0")
     assert e.value.code == "invalid-order-value"
-
-
-from tossinvest_mcp.safety import order_currency
 
 
 def test_order_currency_alpha_is_usd_numeric_is_krw():

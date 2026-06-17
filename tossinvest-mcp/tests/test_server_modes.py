@@ -45,7 +45,6 @@ def test_call_tool_smoke_paper(tmp_path):
 
 def test_build_server_restores_todays_spend(tmp_path):
     from datetime import datetime, timezone
-    from tossinvest_mcp.server import build_app_context
     audit_path = tmp_path / "audit.log"
     ts = datetime.now(timezone.utc).isoformat()
     audit_path.write_text(
