@@ -66,7 +66,7 @@ def test_finalize_consumes_token_and_records_spend():
         m.consume(token)
     assert e.value.code == "invalid-confirmation"
     # spend was recorded toward the daily cap
-    assert m._spent == Decimal("700000")
+    assert m._spent["KRW"] == Decimal("700000")
 
 
 def test_failed_place_leaves_token_for_idempotent_retry():

@@ -161,3 +161,57 @@ def test_build_spec_sets_currency_and_modify_id():
                        modify_order_id="ord-9")
     assert krw.currency == "KRW" and krw.modify_order_id is None
     assert usd.currency == "USD" and usd.modify_order_id == "ord-9"
+
+
+def _usd_spec(m, **kw):
+    base = dict(symbol="AAPL", side="BUY", order_type="LIMIT", quantity="1", price="100")
+    base.update(kw)
+    return m.build_spec(**base)
+
+
+def test_usd_per_order_cap_uses_usd_threshold():
+    m = _mgr(max_order_amount="1000000", max_order_amount_usd="1000")
+    spec = _usd_spec(m, quantity="20", price="100")  # $2,000 > $1,000 cap (KRW cap irrelevant)
+    with pytest.raises(GuardrailError) as e:
+        _ok(m, spec)
+    assert e.value.code == "order-amount-cap"
+
+
+def test_usd_high_value_threshold_is_100k_usd():
+    m = _mgr(max_order_amount_usd="999999999", daily_order_limit_usd="999999999")
+    spec = _usd_spec(m, quantity="2000", price="100")  # $200,000 >= $100,000
+    with pytest.raises(GuardrailError) as e:
+        _ok(m, spec)
+    assert e.value.code == "confirm-high-value-required"
+
+
+def test_usd_hard_ceiling_is_3m_usd():
+    m = _mgr(max_order_amount_usd="999999999", daily_order_limit_usd="999999999")
+    spec = _usd_spec(m, quantity="40000", price="100", confirm_high_value_order=True)  # $4,000,000 > $3,000,000
+    with pytest.raises(GuardrailError) as e:
+        _ok(m, spec)
+    assert e.value.code == "max-order-exceeded"
+
+
+def test_daily_buckets_are_per_currency():
+    m = _mgr(max_order_amount="9000000", daily_order_limit="1000000",
+             max_order_amount_usd="9000", daily_order_limit_usd="9000")
+    krw = _spec(m, quantity="10", price="70000")  # 700,000 KRW
+    m.check_guardrails(krw, is_market_open=True, enforce_hours=False)
+    m.record_spend(krw.notional, krw.currency)
+    # a USD order is unaffected by the KRW bucket being near its limit
+    usd = _usd_spec(m, quantity="1", price="100")  # $100
+    m.check_guardrails(usd, is_market_open=True, enforce_hours=False)  # must NOT raise
+    # but a second KRW order tips the KRW bucket over
+    krw2 = _spec(m, quantity="10", price="70000")
+    with pytest.raises(GuardrailError) as e:
+        m.check_guardrails(krw2, is_market_open=True, enforce_hours=False)
+    assert e.value.code == "daily-limit"
+
+
+def test_check_daily_false_skips_daily_gate():
+    m = _mgr(max_order_amount="9000000", daily_order_limit="1000000")
+    m.record_spend(Decimal("900000"), "KRW")
+    spec = _spec(m, quantity="10", price="70000")  # +700,000 -> over 1,000,000
+    # default would raise daily-limit; check_daily=False skips it (other gates still run)
+    m.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
