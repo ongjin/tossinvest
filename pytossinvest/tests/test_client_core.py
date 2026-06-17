@@ -71,15 +71,95 @@ def test_retries_once_on_expired_token():
 
 
 @respx.mock
-def test_429_raises_rate_limit_error():
+def test_max_retries_zero_raises_immediately():
     _token_route()
-    respx.get(f"{BASE}/api/v1/prices").mock(
-        return_value=httpx.Response(429, json={"error": {"code": "rate-limit-exceeded"}}, headers={"Retry-After": "2"})
-    )
-    c = _client()
+    route = respx.get(f"{BASE}/api/v1/prices").mock(return_value=httpx.Response(
+        429, json={"error": {"code": "rate-limit-exceeded"}}, headers={"Retry-After": "2"}))
+    c = TossInvestClient("cid", "secret", base_url=BASE, sleep=lambda s: None, max_retries=0)
     with pytest.raises(RateLimitError) as exc:
         c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
+    assert route.call_count == 1                 # no retry
     assert exc.value.retry_after == 2.0
+
+
+@respx.mock
+def test_429_then_200_retries_to_success():
+    _token_route()
+    route = respx.get(f"{BASE}/api/v1/prices").mock(side_effect=[
+        httpx.Response(429, json={"error": {"code": "rate-limit-exceeded"}}, headers={"Retry-After": "1"}),
+        httpx.Response(200, json={"result": []}),
+    ])
+    c = _client()                                # default max_retries=3, sleep no-op
+    result = c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
+    assert result == []
+    assert route.call_count == 2
+
+
+@respx.mock
+def test_429_honors_retry_after_in_sleep():
+    _token_route()
+    respx.get(f"{BASE}/api/v1/prices").mock(side_effect=[
+        httpx.Response(429, json={"error": {}}, headers={"Retry-After": "2"}),
+        httpx.Response(200, json={"result": []}),
+    ])
+    slept = []
+    c = TossInvestClient("cid", "secret", base_url=BASE, sleep=lambda s: slept.append(s))
+    c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
+    assert slept == [2.0]
+
+
+@respx.mock
+def test_429_backoff_jitter_when_no_retry_after():
+    _token_route()
+    respx.get(f"{BASE}/api/v1/prices").mock(side_effect=[
+        httpx.Response(429, json={"error": {}}),    # no Retry-After
+        httpx.Response(200, json={"result": []}),
+    ])
+    slept = []
+    c = TossInvestClient("cid", "secret", base_url=BASE,
+                         sleep=lambda s: slept.append(s), rng=lambda: 0.5)
+    c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
+    assert slept == [0.5]                         # 1 * 2**0 * 0.5
+
+
+@respx.mock
+def test_429_exhausts_retries_then_raises():
+    _token_route()
+    route = respx.get(f"{BASE}/api/v1/prices").mock(return_value=httpx.Response(
+        429, json={"error": {"code": "rate-limit-exceeded"}}, headers={"Retry-After": "1"}))
+    c = TossInvestClient("cid", "secret", base_url=BASE, sleep=lambda s: None, max_retries=2)
+    with pytest.raises(RateLimitError):
+        c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
+    assert route.call_count == 3                  # 1 initial + 2 retries
+
+
+@respx.mock
+def test_5xx_is_not_retried():
+    from pytossinvest.errors import ServerError
+    _token_route()
+    route = respx.get(f"{BASE}/api/v1/prices").mock(return_value=httpx.Response(
+        503, json={"error": {"code": "server-error"}}))
+    c = _client()                                # default max_retries=3
+    with pytest.raises(ServerError):
+        c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
+    assert route.call_count == 1                  # no retry on 5xx
+
+
+@respx.mock
+def test_429_retry_preserves_client_order_id_on_post():
+    import json as _json
+    _token_route()
+    route = respx.post(f"{BASE}/api/v1/orders").mock(side_effect=[
+        httpx.Response(429, json={"error": {}}, headers={"Retry-After": "1"}),
+        httpx.Response(200, json={"result": {"orderId": "1", "clientOrderId": "abc"}}),
+    ])
+    c = _client()
+    c._account_seq = 1
+    c.place_order(symbol="005930", side="BUY", order_type="LIMIT",
+                  quantity="1", price="100", client_order_id="abc")
+    assert route.call_count == 2
+    for call in route.calls:
+        assert _json.loads(call.request.content)["clientOrderId"] == "abc"  # idempotent retry
 
 
 def test_gate_applies_peak_hour_halving():

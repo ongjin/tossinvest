@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import time as _time
 from datetime import datetime
 from typing import Any, Callable
@@ -9,7 +10,7 @@ import httpx
 
 from .auth import TokenManager
 from .errors import error_from_response, TossInvestError
-from .ratelimit import TokenBucket, effective_rate
+from .ratelimit import TokenBucket, effective_rate, backoff_wait
 
 __all__ = ["TossInvestClient"]
 
@@ -43,11 +44,17 @@ class TossInvestClient:
         sleep: Callable[[float], None] = _time.sleep,
         monotonic: Callable[[], float] = _time.monotonic,
         now_kst: Callable[[], datetime] = lambda: datetime.now(_KST),
+        max_retries: int = 3,
+        retry_max_wait: float = 60.0,
+        rng: Callable[[], float] = random.random,
     ):
         self._http = httpx.Client(base_url=base_url, timeout=timeout)
         self._token = TokenManager(client_id, client_secret, http=self._http, now=monotonic)
         self._sleep = sleep
         self._now_kst = now_kst
+        self._max_retries = max_retries
+        self._retry_max_wait = retry_max_wait
+        self._rng = rng
         self._buckets: dict[str, TokenBucket] = {
             g: TokenBucket(capacity=r, refill_per_sec=r, now=monotonic)
             for g, r in _GROUP_RATES.items()
@@ -112,6 +119,7 @@ class TossInvestClient:
         json: dict | None = None,
         data: dict | None = None,
         _retried: bool = False,
+        _attempt: int = 0,
     ) -> Any:
         self._gate(group)
         headers = {"Authorization": f"Bearer {self._token.get_token()}"}
@@ -152,7 +160,22 @@ class TossInvestClient:
             self._token.invalidate()
             return self._request(
                 method, path, group=group, account=account,
-                params=params, json=json, data=data, _retried=True,
+                params=params, json=json, data=data, _retried=True, _attempt=_attempt,
+            )
+
+        if resp.status_code == 429 and _attempt < self._max_retries:
+            retry_after = None
+            raw = resp.headers.get("Retry-After")
+            if raw is not None:
+                try:
+                    retry_after = float(raw)
+                except (TypeError, ValueError):
+                    retry_after = None
+            self._sleep(backoff_wait(_attempt, retry_after,
+                                     cap=self._retry_max_wait, rng=self._rng))
+            return self._request(
+                method, path, group=group, account=account,
+                params=params, json=json, data=data, _retried=_retried, _attempt=_attempt + 1,
             )
 
         raise error_from_response(resp.status_code, body, resp.headers)
