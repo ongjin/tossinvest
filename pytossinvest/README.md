@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-MIT-3da639)
-![tests](https://img.shields.io/badge/tests-45%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-46%20passing-2ea44f)
 ![status](https://img.shields.io/badge/Toss%20API-pre--launch-f0ad4e)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -25,7 +25,7 @@
 | 🔁 **멱등성** | `clientOrderId` 로 중복주문 방지 — 네트워크 단절로 응답을 못 받아도 같은 키로 재시도하면 두 번 체결되지 않음(서버측 ~10분 유효). |
 | 🧩 **에러는 `code` 로 분기** | `message` 가 비어도 OK. 서버가 **모르는 code/enum 을 추가해도 안 깨짐**(관용적 파싱). |
 | 🔐 **토큰 생애주기** | 만료 30초 전까지 메모리 캐싱·자동 갱신(`expires_in` 이 30초 이하라도 과거 시각으로 뭉개지지 않게 `max(0, …)` 클램프), `401 expired-token` 시 1회 재발급 후 재시도. |
-| ✅ **라이브 키 없이 그린** | `pytest` → **45개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
+| ✅ **라이브 키 없이 그린** | `pytest` → **46개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
 
 ---
 
@@ -233,7 +233,7 @@ except BusinessRuleError as e:
 ## 테스트
 
 ```bash
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 45 passing
+uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 46 passing
 ```
 
 `respx` 로 httpx 를 mock 합니다 — **라이브 키 불필요, 네트워크 0**. `git clone && uv sync && pytest` 면 그린.

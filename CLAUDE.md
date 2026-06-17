@@ -38,8 +38,8 @@ toss/
 uv sync --package tossinvest-mcp --extra dev
 
 # 테스트
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (45) — respx mock
-uv run --package tossinvest-mcp pytest tossinvest-mcp/tests           # MCP (91) — FakeClient
+uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (46) — respx mock
+uv run --package tossinvest-mcp pytest tossinvest-mcp/tests           # MCP (96) — FakeClient
 
 # MCP 서버 실행 (stdio — Claude Desktop/Cursor 등 MCP 클라이언트용)
 TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
@@ -62,9 +62,10 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 - **notional 통화** — 가드레일은 주문통화 기준 비교(FX 환산 X). 임계는 통화별 — KRW 1억/30억, USD $10만/$300만.
 - **market_hours US 자정넘김** — 미국장을 KST 로 표기하면 23:30→06:00 처럼 자정을 넘긴다. `start > end` 면 wrap 윈도우(`now >= start or now < end`)로 처리. 깨진 시간 문자열은 "닫힘"으로 안전 처리.
 - **MCP 테스트 import** — 테스트에서 `conftest` 의 `FakeClient` 는 `from conftest import FakeClient`(pytest 가 tests/ 를 sys.path 에 넣음). `from tests.conftest` 는 `tests` 패키지가 없어 깨진다.
-- **통화 판정은 심볼 모양** — 알파벳 심볼=USD, 숫자=KRW(FX 환산 없음). KRW/USD 일일누적 버킷이 분리돼 한 통화 한도가 다른 통화를 막지 않는다. notional 단위는 주문통화.
+- **통화 판정은 심볼 모양** — 알파벳 심볼=USD, 숫자=KRW(FX 환산 없음). KRW/USD 일일누적 버킷이 분리돼 한 통화 한도가 다른 통화를 막지 않는다. notional 단위는 주문통화. **[C1 알려진 한계]** 점/접미사 포함 US 티커(`BRK.B` 등)와 공백 변형은 `symbol.isalpha()` 판정에서 KRW 로 분류되어 KRW 임계가 적용된다(회귀 아님 — 브랜치 이전에도 전부 KRW 임계였음). 정확한 통화는 `get_stocks`/`get_prices` 의 `currency` 기반 후속 PR 과제; 외부 의존 0 / 심볼 모양 결정은 유지.
 - **modify 일일누적 미가산(M1)** — modify 는 정정 후 금액에 주문당/고액/하드실링/allow-deny 만 검사(`check_daily=False`), 일일 버킷엔 가산·검사 안 함. 델타 회계 없음.
-- **_spent 부팅 복원** — `place` 감사에 `currency`+`notional` 기록, 서버 시작 시 `audit.read_events()`→`safety.restore_spend` 가 당일(UTC ts→KST 날짜) `placed` 합산. 감사 파일 지우면 당일 누적도 리셋됨(주의).
+- **_spent 부팅 복원** — `place` 감사에 `currency`+`notional` 기록, 서버 시작 시 `audit.read_events()`→`safety.restore_spend` 가 당일(UTC ts→KST 날짜) `placed` 합산. 감사 파일 지우면 당일 누적도 리셋됨(주의). `restore_spend` 는 dict 가 아닌 이벤트나 `notional` 누락/파싱 불가 이벤트를 조용히 건너뜀(손상 감사 파일이 있어도 부팅 불가 없음).
+- **Round 2 하드닝 추가 사항** — `build_spec` 에서 `order_amount` 를 `price` 또는 `quantity` 와 같이 전달하면 `invalid-order-params` 에러(동시 전달 금지). deny/allow 심볼 매칭은 양쪽을 `.strip().upper()` 정규화하여 대소문자·앞뒤 공백 무시(단, `spec.symbol` 자체는 변경 안 함 — 브로커로 원본 전달). SDK 200 경로가 `(ValueError, RecursionError)` 모두 `invalid-response` 로 처리(깊이 중첩된 JSON 이 부팅 크래시 내지 않음).
 
 ## 추가 문서 (docs/)
 
