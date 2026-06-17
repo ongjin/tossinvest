@@ -39,7 +39,7 @@ uv sync --package tossinvest-mcp --extra dev
 
 # 테스트
 uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (46) — respx mock
-uv run --package tossinvest-mcp pytest tossinvest-mcp/tests           # MCP (96) — FakeClient
+uv run --package tossinvest-mcp pytest tossinvest-mcp/tests           # MCP (98) — FakeClient
 
 # MCP 서버 실행 (stdio — Claude Desktop/Cursor 등 MCP 클라이언트용)
 TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \

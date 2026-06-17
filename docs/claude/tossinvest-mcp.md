@@ -7,7 +7,7 @@
 LLM(Claude Desktop/Cursor 등)에 토스 계좌 읽기/거래를 **안전하게** 쥐여주는 MCP 서버. **Apache-2.0**. `pytossinvest` SDK 의존. **stdio** 트랜스포트.
 
 - 위치: `tossinvest-mcp/src/tossinvest_mcp/`
-- 테스트: `uv run --package tossinvest-mcp pytest tossinvest-mcp/tests` (FakeClient + paper 엔진, 96개, **라이브 키 불필요**)
+- 테스트: `uv run --package tossinvest-mcp pytest tossinvest-mcp/tests` (FakeClient + paper 엔진, 98개, **라이브 키 불필요**)
 - 의존: `mcp`(FastMCP), `pydantic-settings`, `pytossinvest`.
 
 ## 🔒 안전 불변식 (이 프로젝트의 핵심 — 절대 깨지 말 것)
