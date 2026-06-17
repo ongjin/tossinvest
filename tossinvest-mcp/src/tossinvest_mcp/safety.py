@@ -54,6 +54,7 @@ class OrderSpec:
     client_order_id: str
     currency: str
     modify_order_id: "str | None" = None
+    prev_notional: "Decimal | None" = None
 
 
 @dataclass
@@ -126,7 +127,7 @@ class SafetyManager:
 
     def check_guardrails(
         self, spec: OrderSpec, *, is_market_open: bool, enforce_hours: bool,
-        check_daily: bool = True,
+        check_daily: bool = True, prev_notional: "Decimal | None" = None,
     ) -> None:
         cfg = self._cfg
         if spec.currency == "USD":
@@ -161,7 +162,8 @@ class SafetyManager:
             )
         if check_daily:
             self._roll_daily()
-            if self._spent[spec.currency] + spec.notional > daily_cap:
+            increment = spec.notional if prev_notional is None else spec.notional - prev_notional
+            if self._spent[spec.currency] + increment > daily_cap:
                 raise GuardrailError(
                     "daily-limit",
                     f"this order would push today's {spec.currency} total over {daily_cap}",

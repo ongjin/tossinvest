@@ -273,3 +273,33 @@ def test_build_spec_currency_none_falls_back_to_symbol_shape():
     spec = m.build_spec(symbol="AAPL", side="BUY", order_type="MARKET",
                         order_amount="100", currency=None)
     assert spec.currency == "USD"  # symbol-shape fallback
+
+
+def test_daily_check_uses_delta_when_prev_notional_given():
+    m = _mgr(max_order_amount="9000000", daily_order_limit="1000000")
+    m.record_spend(Decimal("950000"), "KRW")  # bucket near cap
+    # amended order: new=710,000, prev=700,000 -> delta=+10,000 -> 960,000 <= 1,000,000 OK
+    spec = _spec(m, quantity="10", price="71000")  # notional 710,000
+    m.check_guardrails(spec, is_market_open=True, enforce_hours=False,
+                       prev_notional=Decimal("700000"))  # must NOT raise
+
+
+def test_daily_check_delta_still_rejects_when_over_cap():
+    m = _mgr(max_order_amount="9000000", daily_order_limit="1000000")
+    m.record_spend(Decimal("950000"), "KRW")
+    # new=900,000, prev=100,000 -> delta=+800,000 -> 1,750,000 > 1,000,000 -> reject
+    spec = _spec(m, quantity="10", price="90000")  # notional 900,000
+    with pytest.raises(GuardrailError) as e:
+        m.check_guardrails(spec, is_market_open=True, enforce_hours=False,
+                           prev_notional=Decimal("100000"))
+    assert e.value.code == "daily-limit"
+
+
+def test_per_order_cap_uses_full_notional_not_delta():
+    m = _mgr(max_order_amount="500000", daily_order_limit="999999999")
+    # delta tiny but full new notional exceeds per-order cap
+    spec = _spec(m, quantity="10", price="71000")  # 710,000 > 500,000 cap
+    with pytest.raises(GuardrailError) as e:
+        m.check_guardrails(spec, is_market_open=True, enforce_hours=False,
+                           prev_notional=Decimal("700000"))
+    assert e.value.code == "order-amount-cap"
