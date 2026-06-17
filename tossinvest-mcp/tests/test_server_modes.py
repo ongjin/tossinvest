@@ -8,7 +8,7 @@ from conftest import FakeClient  # reuse the fake (pytest puts tests/ on sys.pat
 READ_TOOLS = {"get_accounts", "get_holdings", "get_quote", "get_candles",
               "get_stock_info", "get_market_info", "list_orders", "get_order"}
 WRITE_TOOLS = {"get_order_readiness", "preview_order", "place_order",
-               "modify_order", "cancel_order"}
+               "preview_modify", "modify_order", "cancel_order"}
 
 
 def _build(tmp_path, mode, **kw):
