@@ -54,3 +54,28 @@ def test_peak_hour_halves_order_groups():
     assert effective_rate("ORDER_INFO", 6, peak) == 3
     assert effective_rate("ORDER", 6, off) == 6
     assert effective_rate("MARKET_DATA", 10, peak) == 10  # not an order group
+
+
+def test_backoff_wait_honors_retry_after():
+    from pytossinvest.ratelimit import backoff_wait
+    assert backoff_wait(0, 2.0, cap=60.0, rng=lambda: 0.5) == 2.0
+
+
+def test_backoff_wait_exponential_with_jitter_when_no_retry_after():
+    from pytossinvest.ratelimit import backoff_wait
+    # base 1 * 2**2 * 0.5 = 2.0
+    assert backoff_wait(2, None, base=1.0, cap=60.0, rng=lambda: 0.5) == 2.0
+    # attempt 0 -> 1 * 1 * 0.5 = 0.5
+    assert backoff_wait(0, None, base=1.0, cap=60.0, rng=lambda: 0.5) == 0.5
+
+
+def test_backoff_wait_clamps_to_cap():
+    from pytossinvest.ratelimit import backoff_wait
+    assert backoff_wait(10, None, base=1.0, cap=5.0, rng=lambda: 1.0) == 5.0   # 1024 -> 5
+    assert backoff_wait(0, 999.0, cap=60.0, rng=lambda: 0.0) == 60.0           # retry_after clamped
+
+
+def test_backoff_wait_ignores_nonpositive_retry_after():
+    from pytossinvest.ratelimit import backoff_wait
+    # retry_after 0 -> fall back to backoff (1 * 2**0 * 0.5 = 0.5)
+    assert backoff_wait(0, 0.0, base=1.0, cap=60.0, rng=lambda: 0.5) == 0.5
