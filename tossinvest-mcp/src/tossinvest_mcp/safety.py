@@ -182,7 +182,9 @@ class SafetyManager:
 
     def record_spend(self, notional: Decimal, currency: str = "KRW") -> None:
         self._roll_daily()
-        self._spent[currency] = self._spent.get(currency, Decimal("0")) + notional
+        self._spent[currency] = max(
+            Decimal("0"), self._spent.get(currency, Decimal("0")) + notional
+        )
 
     def restore_spend(self, events: list[dict]) -> None:
         """Rebuild today's per-currency spend from prior 'placed' audit events (UTC ts -> KST date)."""
@@ -238,7 +240,3 @@ class SafetyManager:
         pending = self._pending.pop(token, None)
         currency = pending.spec.currency if pending else "KRW"
         self.record_spend(notional, currency)
-
-    def release(self, token: str) -> None:
-        """Drop a pending token without recording spend (modify: per-order gated, no daily bucket)."""
-        self._pending.pop(token, None)

@@ -105,16 +105,12 @@ def test_min_delay_off_by_default_even_in_live():
     assert m.consume(token).client_order_id  # immediate consume OK
 
 
-def test_release_pops_without_recording_spend():
+def test_record_spend_floors_at_zero():
     clock = Clock()
     m = _mgr(clock, daily_order_limit="999999999")
-    spec = _spec(m)
-    token = m.issue_token(spec)
-    m.release(token)
-    assert m._spent["KRW"] == Decimal("0")  # NOT recorded
-    with pytest.raises(GuardrailError) as e:
-        m.consume(token)  # token gone
-    assert e.value.code == "invalid-confirmation"
+    m.record_spend(Decimal("100000"), "KRW")
+    m.record_spend(Decimal("-300000"), "KRW")  # over-credit (modify downsize)
+    assert m._spent["KRW"] == Decimal("0")  # floored, never negative
 
 
 def test_restore_spend_sums_todays_placed_by_currency():

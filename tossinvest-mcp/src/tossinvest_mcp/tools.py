@@ -261,9 +261,13 @@ def preview_modify(app: AppContext, order_id: str, *, order_type: str,
         confirm_high_value_order=confirm_high_value_order, modify_order_id=order_id,
         currency=currency,
     )
+    orig_price = original.get("price")
+    orig_qty = original.get("quantity")
+    if orig_price is not None and orig_qty is not None:
+        spec.prev_notional = to_decimal(orig_price) * to_decimal(orig_qty)
     is_open, enforce = _market_gate(app, symbol)
     app.safety.check_guardrails(spec, is_market_open=is_open, enforce_hours=enforce,
-                                check_daily=False)  # M1: per-order gated, no daily bucket
+                                check_daily=True, prev_notional=spec.prev_notional)
     token = app.safety.issue_token(spec)
     app.audit.record({
         "tool": "preview_modify", "mode": app.config.mode, "decision": "modify_previewed",
@@ -285,8 +289,9 @@ def preview_modify(app: AppContext, order_id: str, *, order_type: str,
 
 def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
     spec = app.safety.consume(confirmation_token)  # validates exists + not expired
-    # re-check amount guardrails on the amended order (M1: no daily bucket add/check)
-    app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
+    # re-check amount guardrails on the amended order against the delta (M1: delta accounting)
+    app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False,
+                                check_daily=True, prev_notional=spec.prev_notional)
     try:
         result = app.client.modify_order(
             spec.modify_order_id, order_type=spec.order_type,
@@ -301,11 +306,13 @@ def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
         })
         raise  # token NOT released -> idempotent retry reuses same clientOrderId
 
-    app.safety.release(confirmation_token)  # pop only, no daily accrual (M1)
+    delta = spec.notional - (spec.prev_notional or Decimal("0"))
+    app.safety.finalize(confirmation_token, delta)  # pop + accrue signed delta (floored)
     app.audit.record({
         "tool": "modify_order", "mode": app.config.mode, "decision": "modified",
         "orderId": spec.modify_order_id, "result": result,
         "clientOrderId": spec.client_order_id,
+        "notional": delta, "currency": spec.currency,
     })
     return result
 
