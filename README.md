@@ -9,7 +9,7 @@ decimal·레이트리밋·멱등성까지 제대로 다룬 **SDK** + LLM 에게 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![SDK](https://img.shields.io/badge/SDK-MIT-3da639)
 ![MCP](https://img.shields.io/badge/MCP%20server-Apache--2.0-d22128)
-![tests](https://img.shields.io/badge/tests-106%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-142%20passing-2ea44f)
 ![status](https://img.shields.io/badge/Toss%20API-pre--launch-f0ad4e)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -41,7 +41,7 @@ decimal·레이트리밋·멱등성까지 제대로 다룬 **SDK** + LLM 에게 
 | 🔁 **멱등성** | `clientOrderId` 자동 관리 — 네트워크 단절로 응답을 못 받아도 같은 키로 재시도해 **중복주문 방지**. |
 | 🧩 **에러는 `code` 로 분기** | `message` 가 비어도 OK. 서버가 **모르는 코드/enum 을 추가해도 안 깨짐**. |
 | 🔐 **토큰 생애주기** | 만료 전 갱신·메모리 캐싱, `401 expired-token` 시 1회 재발급 후 재시도. |
-| ✅ **라이브 키 없이 그린** | `git clone && uv sync && pytest` → **106개 테스트** 통과. 기여 장벽 0. |
+| ✅ **라이브 키 없이 그린** | `git clone && uv sync && pytest` → **142개 테스트** 통과. 기여 장벽 0. |
 
 ---
 
@@ -52,8 +52,8 @@ decimal·레이트리밋·멱등성까지 제대로 다룬 **SDK** + LLM 에게 
 ![안전모델 — 3중 방어](docs/images/safety-model.png)
 
 1. **모드 게이트 — 기본값이 안전.** `read_only`(주문 툴 아예 미등록) / **`paper`(기본 · 로컬 시뮬 체결, 실주문 0)** / `live`(실주문). live 는 `TOSSINVEST_MODE=live` **와** `TOSSINVEST_ALLOW_LIVE=1` 이 *둘 다* 있어야 켜집니다. 모드만 바꿔선 아무 일도 안 일어나요(fail-closed).
-2. **2단계 주문 — human-in-the-loop.** `preview_order` 가 가드레일을 검사하고 예상비용과 함께 **짧게 유효한 토큰**을 발급. `place_order` 는 그 토큰 없이는 **거부**. LLM 이 한 방에 YOLO 매매 못 합니다.
-3. **가드레일 — paper·live 모두.** 주문당/일일 누적 금액 상한 · 종목 allow/deny · **1억↑ 명시적 확인 필수** · **30억↑ 즉시 거부** · 장운영시간(live).
+2. **2단계 주문 — human-in-the-loop.** `preview_order` 가 가드레일을 검사하고 예상비용과 함께 **짧게 유효한 토큰**을 발급. `place_order` 는 그 토큰 없이는 **거부**. LLM 이 한 방에 YOLO 매매 못 합니다. 정정(`modify_order`)도 `preview_modify`→토큰 게이트를 똑같이 거칩니다(정정 후 금액에 가드레일 적용).
+3. **가드레일 — paper·live 모두.** 주문당/일일 누적 금액 상한(**통화별** — KRW/USD 분리) · 종목 allow/deny · **고액 명시적 확인 필수**(KRW 1억 / USD $100k↑) · **하드 실링 즉시 거부**(KRW 30억 / USD $3M↑) · 장운영시간(live).
 
 > **불변식:** 체결 경로는 **반드시** 가드레일을 통과합니다. 토큰은 `preview_order` 에서만, 가드레일 통과 후 발급돼요. 우회 경로가 없습니다.
 
@@ -107,6 +107,8 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 
 기본 `paper` 라 실주문은 0건 — 안심하고 *"삼성전자 10주 미리보기 해줘"* 부터 시켜보세요. 실거래로 가려면 `TOSSINVEST_MODE=live` + `TOSSINVEST_ALLOW_LIVE=1`.
 
+> ⚠️ **live 는 *자동승인* MCP 클라이언트와 같이 쓰지 마세요.** preview→place 2단계는 *사람이 각 호출을 승인*한다는 전제입니다. 클라이언트가 툴 호출을 자동 승인하면 LLM 이 한 턴에 preview→place 를 연달아 쏴 사람이 못 낍니다. 추가 방어로 `tossinvest-mcp` 의 `LIVE_CONFIRM_MIN_DELAY_SEC` 를 쓸 수 있습니다.
+
 ---
 
 ## 모드 한눈에
@@ -117,10 +119,10 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 | **`paper`** *(기본)* | ○ | 로컬 시뮬 포트폴리오 체결, **실주문 0** | (기본값) |
 | `live` | ○ | 실주문 | `MODE=live` **+** `ALLOW_LIVE=1` |
 
-## MCP 툴 (13개)
+## MCP 툴 (14개)
 
 - **읽기 (항상):** `get_accounts` · `get_holdings` · `get_quote` · `get_candles` · `get_stock_info` · `get_market_info` · `list_orders` · `get_order`
-- **쓰기 (paper·live):** `get_order_readiness` · **`preview_order` → `place_order`** · `modify_order` · `cancel_order`
+- **쓰기 (paper·live):** `get_order_readiness` · **`preview_order` → `place_order`** · **`preview_modify` → `modify_order`** · `cancel_order`
 
 가드레일 한도·종목 allow/deny·시작 현금 등은 전부 env 로 조절합니다 → [`tossinvest-mcp/README.md`](tossinvest-mcp/README.md).
 
@@ -137,8 +139,8 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 
 ```bash
 # 테스트 — 라이브 키 불필요
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 42 passing
-uv run --package tossinvest-mcp pytest tossinvest-mcp/tests           # 64 passing
+uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 46 passing
+uv run --package tossinvest-mcp pytest tossinvest-mcp/tests           # 96 passing
 ```
 
 더 깊은 문서는 [`docs/claude/`](docs/claude/) — [API 레퍼런스](docs/claude/tossinvest-open-api.md) · [SDK 내부구조](docs/claude/pytossinvest-sdk.md) · [MCP 안전모델](docs/claude/tossinvest-mcp.md).

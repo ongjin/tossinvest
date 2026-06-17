@@ -123,3 +123,141 @@ def test_market_closed_rejected_when_enforced():
     with pytest.raises(GuardrailError) as e:
         m.check_guardrails(_spec(m), is_market_open=False, enforce_hours=True)
     assert e.value.code == "market-closed"
+
+
+def test_build_spec_rejects_nonpositive_quantity():
+    m = _mgr()
+    with pytest.raises(GuardrailError) as e:
+        m.build_spec(symbol="005930", side="BUY", order_type="LIMIT", quantity="0", price="70000")
+    assert e.value.code == "invalid-order-value"
+
+
+def test_build_spec_rejects_negative_price():
+    m = _mgr()
+    with pytest.raises(GuardrailError) as e:
+        m.build_spec(symbol="005930", side="BUY", order_type="LIMIT", quantity="10", price="-1")
+    assert e.value.code == "invalid-order-value"
+
+
+def test_build_spec_rejects_nonpositive_order_amount():
+    m = _mgr()
+    with pytest.raises(GuardrailError) as e:
+        m.build_spec(symbol="AAPL", side="BUY", order_type="MARKET", order_amount="0")
+    assert e.value.code == "invalid-order-value"
+
+
+from tossinvest_mcp.safety import order_currency
+
+
+def test_order_currency_alpha_is_usd_numeric_is_krw():
+    assert order_currency("AAPL") == "USD"
+    assert order_currency("005930") == "KRW"
+
+
+def test_build_spec_sets_currency_and_modify_id():
+    m = _mgr()
+    krw = m.build_spec(symbol="005930", side="BUY", order_type="LIMIT", quantity="1", price="70000")
+    usd = m.build_spec(symbol="AAPL", side="BUY", order_type="MARKET", order_amount="100",
+                       modify_order_id="ord-9")
+    assert krw.currency == "KRW" and krw.modify_order_id is None
+    assert usd.currency == "USD" and usd.modify_order_id == "ord-9"
+
+
+def _usd_spec(m, **kw):
+    base = dict(symbol="AAPL", side="BUY", order_type="LIMIT", quantity="1", price="100")
+    base.update(kw)
+    return m.build_spec(**base)
+
+
+def test_usd_per_order_cap_uses_usd_threshold():
+    m = _mgr(max_order_amount="1000000", max_order_amount_usd="1000")
+    spec = _usd_spec(m, quantity="20", price="100")  # $2,000 > $1,000 cap (KRW cap irrelevant)
+    with pytest.raises(GuardrailError) as e:
+        _ok(m, spec)
+    assert e.value.code == "order-amount-cap"
+
+
+def test_usd_high_value_threshold_is_100k_usd():
+    m = _mgr(max_order_amount_usd="999999999", daily_order_limit_usd="999999999")
+    spec = _usd_spec(m, quantity="2000", price="100")  # $200,000 >= $100,000
+    with pytest.raises(GuardrailError) as e:
+        _ok(m, spec)
+    assert e.value.code == "confirm-high-value-required"
+
+
+def test_usd_hard_ceiling_is_3m_usd():
+    m = _mgr(max_order_amount_usd="999999999", daily_order_limit_usd="999999999")
+    spec = _usd_spec(m, quantity="40000", price="100", confirm_high_value_order=True)  # $4,000,000 > $3,000,000
+    with pytest.raises(GuardrailError) as e:
+        _ok(m, spec)
+    assert e.value.code == "max-order-exceeded"
+
+
+def test_daily_buckets_are_per_currency():
+    m = _mgr(max_order_amount="9000000", daily_order_limit="1000000",
+             max_order_amount_usd="9000", daily_order_limit_usd="9000")
+    krw = _spec(m, quantity="10", price="70000")  # 700,000 KRW
+    m.check_guardrails(krw, is_market_open=True, enforce_hours=False)
+    m.record_spend(krw.notional, krw.currency)
+    # a USD order is unaffected by the KRW bucket being near its limit
+    usd = _usd_spec(m, quantity="1", price="100")  # $100
+    m.check_guardrails(usd, is_market_open=True, enforce_hours=False)  # must NOT raise
+    # but a second KRW order tips the KRW bucket over
+    krw2 = _spec(m, quantity="10", price="70000")
+    with pytest.raises(GuardrailError) as e:
+        m.check_guardrails(krw2, is_market_open=True, enforce_hours=False)
+    assert e.value.code == "daily-limit"
+
+
+def test_check_daily_false_skips_daily_gate():
+    m = _mgr(max_order_amount="9000000", daily_order_limit="1000000")
+    m.record_spend(Decimal("900000"), "KRW")
+    spec = _spec(m, quantity="10", price="70000")  # +700,000 -> over 1,000,000
+    # default would raise daily-limit; check_daily=False skips it (other gates still run)
+    m.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
+
+
+def test_build_spec_rejects_order_amount_with_price():
+    m = _mgr()
+    with pytest.raises(GuardrailError) as e:
+        m.build_spec(symbol="AAPL", side="BUY", order_type="LIMIT",
+                     order_amount="100", price="1000000", quantity="1000")
+    assert e.value.code == "invalid-order-params"
+
+
+def test_build_spec_rejects_order_amount_with_quantity():
+    m = _mgr()
+    with pytest.raises(GuardrailError) as e:
+        m.build_spec(symbol="AAPL", side="BUY", order_type="MARKET",
+                     order_amount="100", quantity="1000")
+    assert e.value.code == "invalid-order-params"
+
+
+def test_deny_list_matches_whitespace_and_case_insensitive():
+    m = _mgr(deny_symbols=["AAPL"])
+    with pytest.raises(GuardrailError) as e:
+        _ok(m, _spec(m, symbol=" aapl "))  # evasion attempt
+    assert e.value.code == "symbol-denied"
+
+
+def test_allow_list_normalizes_symbol():
+    m = _mgr(allow_symbols=["aapl"], max_order_amount_usd="999999999",
+             daily_order_limit_usd="999999999")  # config lowercase
+    _ok(m, _spec(m, symbol="AAPL"))       # must pass (normalized match)
+
+
+def test_deny_list_blocks_unicode_whitespace_and_fullwidth_evasion():
+    m = _mgr(deny_symbols=["AAPL"])
+    for evasion in [" AAPL", "AAPL​", "ＡＡＰＬ"]:  # NBSP, zero-width, fullwidth
+        with pytest.raises(GuardrailError) as e:
+            _ok(m, _spec(m, symbol=evasion, price="100"))
+        assert e.value.code == "symbol-denied", evasion
+
+
+def test_canon_symbol_keeps_legit_dotted_symbol():
+    m = _mgr(deny_symbols=["BRK.B"])
+    with pytest.raises(GuardrailError) as e:
+        _ok(m, _spec(m, symbol="brk.b", price="100"))   # normalized match
+    assert e.value.code == "symbol-denied"
+    # an unrelated dotted symbol is not blocked
+    _ok(m, _spec(m, symbol="BF.B"))

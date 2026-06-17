@@ -4,7 +4,7 @@
 - **커밋/푸시/머지는 요청 시에만**. 브랜치 전략은 `main` 단일. feature 작업은 `feat/<name>` 브랜치 → 리뷰 후 머지.
 - **돈/수량 float 금지** — 전구간 **문자열/Decimal**. SDK 의 `pytossinvest.money.to_decimal` 이 float 를 `TypeError` 로 거부(강제). MCP 레이어도 입출력 모두 문자열 유지(JSON/Decimal 안전).
 - **SDK 공개 API 깨지 말 것** — `tossinvest-mcp` 가 `pytossinvest` 에 의존. SDK 시그니처/반환 타입 변경 시 **MCP 테스트도 그린 확인** 후 진행.
-- **`place_order` 안전 불변식 (프로젝트 핵심)** — 체결 경로(`paper.place` / `client.place_order`)는 **반드시 `safety.check_guardrails` 를 거친다**. confirmation 토큰은 `preview_order` 에서만, 가드레일 통과 후 발급. `place_order` 는 `consume(token)` → 실행 → **성공 시에만 `finalize`**(실패하면 토큰 살아남아 같은 `clientOrderId` 로 멱등 재시도). 이 불변식을 우회하는 변경 금지.
+- **`place_order` 안전 불변식 (프로젝트 핵심)** — 체결 경로(`paper.place` / `client.place_order`)는 **반드시 `safety.check_guardrails` 를 거친다**. confirmation 토큰은 `preview_order` 에서만, 가드레일 통과 후 발급. `place_order` 는 `consume(token)` → 실행 → **성공 시에만 `finalize`**(실패하면 토큰 살아남아 같은 `clientOrderId` 로 멱등 재시도). 이 불변식을 우회하는 변경 금지. **modify 도 동형 2단계**(`preview_modify`→`modify_order(confirmation_token)`): consume → 가드레일 재검사(`check_daily=False`, M1 — 일일누적 미가산) → 실행 → 성공 시 `release`(pop only) / 실패 시 토큰 유지. 우회 금지.
 
 # 토스증권 Open API 오픈소스 (pytossinvest + tossinvest-mcp)
 
@@ -14,7 +14,7 @@
 
 - **Runtime**: Python 3.12, **uv 워크스페이스** 모노레포 (hatchling build)
 - **`pytossinvest`** (SDK, **MIT**): `httpx`(sync) + `pydantic` v2. 토큰매니저·그룹별 레이트리미터·decimal-safe money·code 기반 에러·17 엔드포인트.
-- **`tossinvest-mcp`** (MCP 서버, **Apache-2.0**, SDK 의존): `mcp`(FastMCP, stdio) + `pydantic-settings`. 안전모델(모드·가드레일·preview/confirm·멱등성·감사로그) + 13 툴.
+- **`tossinvest-mcp`** (MCP 서버, **Apache-2.0**, SDK 의존): `mcp`(FastMCP, stdio) + `pydantic-settings`. 안전모델(모드·가드레일·preview/confirm·멱등성·감사로그) + 14 툴.
 - **테스트**: `pytest`. SDK 는 `respx` 로 httpx mock, MCP 는 `FakeClient` + paper 엔진 — **라이브 키 불필요, 네트워크 0**.
 
 ## Project Structure
@@ -38,8 +38,8 @@ toss/
 uv sync --package tossinvest-mcp --extra dev
 
 # 테스트
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (42) — respx mock
-uv run --package tossinvest-mcp pytest tossinvest-mcp/tests           # MCP (64) — FakeClient
+uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (46) — respx mock
+uv run --package tossinvest-mcp pytest tossinvest-mcp/tests           # MCP (96) — FakeClient
 
 # MCP 서버 실행 (stdio — Claude Desktop/Cursor 등 MCP 클라이언트용)
 TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
@@ -50,8 +50,8 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 
 - **money/quantity**: 전부 문자열/Decimal. float 진입 경로 자체를 안 만든다. (위 CRITICAL RULES)
 - **SDK 규약** (`pytossinvest`): 응답 `result` 자동 언래핑(토큰 엔드포인트 제외)·**`code` 기반 에러 분기**(unknown code 관용)·**`X-RateLimit-*` 헤더가 진실**(표 숫자 하드코딩 금지)·`accountSeq` 1회 캐싱(ACCOUNT 1/s)·**`clientOrderId` 멱등성 수동**(10분). v0.0.1 한계: 헤더 동적 동기화·자동 retry/backoff 미구현(`RateLimitError.retry_after` 던짐 → 호출자/ MCP 책임).
-- **MCP 안전모델** (`tossinvest-mcp`): 3모드 `TOSSINVEST_MODE` = `read_only`(주문툴 미등록) / **`paper`**(기본, 로컬 `PaperBroker` 체결) / `live`(`TOSSINVEST_ALLOW_LIVE=1` 까지 있어야 켜짐 — config validator 가 이중게이트). 가드레일(주문당·일일 상한·allow/deny·1억↑ confirm 필수·30억↑ 거부·장시간 게이트는 live 전용). preview→place 2단계 + consume-on-success 멱등성 + 감사로그(JSONL).
-- **설정**: `tossinvest-mcp` 는 `pydantic-settings`, env prefix `TOSSINVEST_` (`MODE`/`ALLOW_LIVE`/`CLIENT_ID`/`CLIENT_SECRET`/`MAX_ORDER_AMOUNT`/`DAILY_ORDER_LIMIT`/`ALLOW_SYMBOLS`/`DENY_SYMBOLS`/`ENFORCE_MARKET_HOURS`). 상세는 `tossinvest-mcp/README.md`.
+- **MCP 안전모델** (`tossinvest-mcp`): 3모드 `TOSSINVEST_MODE` = `read_only`(주문툴 미등록) / **`paper`**(기본, 로컬 `PaperBroker` 체결) / `live`(`TOSSINVEST_ALLOW_LIVE=1` 까지 있어야 켜짐 — config validator 가 이중게이트). 가드레일(**주문통화별** 주문당·일일 상한·allow/deny·고액 confirm 필수·하드실링 거부 — KRW 1억/30억, USD $10만/$300만, 알파벳=USD·숫자=KRW·FX 환산 X; 장시간 게이트는 live 전용). preview→place / preview_modify→modify 2단계 + consume-on-success 멱등성(modify 는 `release`) + place 시 일일한도 재검사 + 부팅 시 감사로그로 당일 누적 복원 + 감사로그(JSONL).
+- **설정**: `tossinvest-mcp` 는 `pydantic-settings`, env prefix `TOSSINVEST_` (`MODE`/`ALLOW_LIVE`/`CLIENT_ID`/`CLIENT_SECRET`/`MAX_ORDER_AMOUNT`/`DAILY_ORDER_LIMIT`/`ALLOW_SYMBOLS`/`DENY_SYMBOLS`/`ENFORCE_MARKET_HOURS`/`MAX_ORDER_AMOUNT_USD`/`DAILY_ORDER_LIMIT_USD`/`LIVE_CONFIRM_MIN_DELAY_SEC`). 상세는 `tossinvest-mcp/README.md`.
 - **라이선스**: SDK=**MIT**, MCP=**Apache-2.0**. 각 패키지에 `LICENSE`(+MCP `NOTICE`) + `pyproject.toml` `license` 필드. README 에 명시. "비공식(unofficial) 클라이언트" 표기로 토스 상표/엔도르스먼트 오해 방지.
 
 ## 주의할 함정 (이미 겪었거나 설계로 막은 것)
@@ -59,9 +59,13 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 - **토스 API 사전신청 단계** — 한도·정책·엔드포인트·필드가 정식 오픈 전까지 바뀔 수 있다. `docs/claude/tossinvest-open-api.md` 는 **스냅샷**이니 막히면 canonical `openapi.json` 재확인(자가갱신).
 - **paper modify/cancel 은 live 전용** — paper 는 즉시체결 모델이라 정정/취소할 미체결 주문이 없음(`PaperError` 로 명확히 거부, 실제 `409 already-filled` 미러링).
 - **paper MARKET 체결가** — 체결 시점에 시세가 비면 가격 0 으로 조용히 체결되던 버그를 막음 → ref price 없으면 `PaperError`(토큰 살려둠, 재시도 가능).
-- **notional 통화** — 가드레일은 주문통화 기준 비교(FX 환산 X). 1억/30억 임계는 KRW 가정.
+- **notional 통화** — 가드레일은 주문통화 기준 비교(FX 환산 X). 임계는 통화별 — KRW 1억/30억, USD $10만/$300만.
 - **market_hours US 자정넘김** — 미국장을 KST 로 표기하면 23:30→06:00 처럼 자정을 넘긴다. `start > end` 면 wrap 윈도우(`now >= start or now < end`)로 처리. 깨진 시간 문자열은 "닫힘"으로 안전 처리.
 - **MCP 테스트 import** — 테스트에서 `conftest` 의 `FakeClient` 는 `from conftest import FakeClient`(pytest 가 tests/ 를 sys.path 에 넣음). `from tests.conftest` 는 `tests` 패키지가 없어 깨진다.
+- **통화 판정은 심볼 모양** — 알파벳 심볼=USD, 숫자=KRW(FX 환산 없음). KRW/USD 일일누적 버킷이 분리돼 한 통화 한도가 다른 통화를 막지 않는다. notional 단위는 주문통화. **[C1 알려진 한계]** 점/접미사 포함 US 티커(`BRK.B` 등)와 공백 변형은 `symbol.isalpha()` 판정에서 KRW 로 분류되어 KRW 임계가 적용된다(회귀 아님 — 브랜치 이전에도 전부 KRW 임계였음). 정확한 통화는 `get_stocks`/`get_prices` 의 `currency` 기반 후속 PR 과제; 외부 의존 0 / 심볼 모양 결정은 유지.
+- **modify 일일누적 미가산(M1)** — modify 는 정정 후 금액에 주문당/고액/하드실링/allow-deny 만 검사(`check_daily=False`), 일일 버킷엔 가산·검사 안 함. 델타 회계 없음.
+- **_spent 부팅 복원** — `place` 감사에 `currency`+`notional` 기록, 서버 시작 시 `audit.read_events()`→`safety.restore_spend` 가 당일(UTC ts→KST 날짜) `placed` 합산. 감사 파일 지우면 당일 누적도 리셋됨(주의). `restore_spend` 는 dict 가 아닌 이벤트나 `notional` 누락/파싱 불가 이벤트를 조용히 건너뜀(손상 감사 파일이 있어도 부팅 불가 없음).
+- **Round 2 하드닝 추가 사항** — `build_spec` 에서 `order_amount` 를 `price` 또는 `quantity` 와 같이 전달하면 `invalid-order-params` 에러(동시 전달 금지). deny/allow 심볼 매칭은 양쪽을 `.strip().upper()` 정규화하여 대소문자·앞뒤 공백 무시(단, `spec.symbol` 자체는 변경 안 함 — 브로커로 원본 전달). SDK 200 경로가 `(ValueError, RecursionError)` 모두 `invalid-response` 로 처리(깊이 중첩된 JSON 이 부팅 크래시 내지 않음).
 
 ## 추가 문서 (docs/)
 
@@ -70,7 +74,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 **living (docs/claude/ — 코드 만지기 전 읽고, 만진 뒤 갱신):**
 - [docs/claude/tossinvest-open-api.md](docs/claude/tossinvest-open-api.md) — **토스 Open API 레퍼런스 (외부 스펙)**. 인증 2단(`X-Tossinvest-Account`)·엔드포인트 전체·요청/응답 스키마·enum·rate limit 10그룹·에러코드 전체표·주문 함정(멱등성 10분·고액확인·US 금액주문·OrderStatus 10종). 외부 API 사실관계가 필요할 때.
 - [docs/claude/pytossinvest-sdk.md](docs/claude/pytossinvest-sdk.md) — **SDK 내부구조**. 공개 API 표면(클라이언트·에러·모델·money), `_request` 오케스트레이션(언래핑·계좌헤더·401재시도·레이트게이트), 모듈별 책임·함정·v0.0.1 한계, 새 엔드포인트 추가 절차. `pytossinvest/` 코드 만질 때.
-- [docs/claude/tossinvest-mcp.md](docs/claude/tossinvest-mcp.md) — **MCP 내부구조 + 안전 불변식**. 3모드 라우팅표, 가드레일 순서, preview→place 토큰 생애·멱등성, 13툴, 모듈별 함정(paper 즉시체결·MARKET 무가격·US 자정넘김·conftest import), 새 툴 추가 절차. `tossinvest-mcp/` 코드 만질 때.
+- [docs/claude/tossinvest-mcp.md](docs/claude/tossinvest-mcp.md) — **MCP 내부구조 + 안전 불변식**. 3모드 라우팅표, 가드레일 순서(통화별 임계), preview→place/modify 토큰 생애·멱등성, 14툴, 모듈별 함정(paper 즉시체결·MARKET 무가격·US 자정넘김·conftest import·통화판정·M1 modify·부팅복원), 새 툴 추가 절차. `tossinvest-mcp/` 코드 만질 때.
 
 **design history (docs/superpowers/ — 왜 이렇게 만들었나):**
 - [docs/superpowers/specs/2026-06-17-tossinvest-mcp-design.md](docs/superpowers/specs/2026-06-17-tossinvest-mcp-design.md) — **설계 확정본**. 모드 3단계·안전모델(§3)·툴 매핑(§4)·크로스커팅 인프라(§5)·테스트 전략(§6)·규제 메모(§7)·라이선스(§9).

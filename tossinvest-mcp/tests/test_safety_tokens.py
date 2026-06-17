@@ -66,7 +66,7 @@ def test_finalize_consumes_token_and_records_spend():
         m.consume(token)
     assert e.value.code == "invalid-confirmation"
     # spend was recorded toward the daily cap
-    assert m._spent == Decimal("700000")
+    assert m._spent["KRW"] == Decimal("700000")
 
 
 def test_failed_place_leaves_token_for_idempotent_retry():
@@ -79,3 +79,67 @@ def test_failed_place_leaves_token_for_idempotent_retry():
     # retry: same token still valid, same clientOrderId reused
     second = m.consume(token)
     assert first.client_order_id == second.client_order_id
+
+
+def _live_mgr(clock, **overrides):
+    s = Settings(_env_file=None, mode="live", allow_live=True,
+                 confirmation_ttl_sec=120, **overrides)
+    return SafetyManager(s, now=clock, today=lambda: date(2026, 6, 17))
+
+
+def test_live_min_delay_blocks_immediate_consume_then_allows():
+    clock = Clock()
+    m = _live_mgr(clock, live_confirm_min_delay_sec=5)
+    token = m.issue_token(_spec(m))
+    with pytest.raises(GuardrailError) as e:
+        m.consume(token)  # 0s since issue, < 5
+    assert e.value.code == "confirm-too-soon"
+    clock.advance(5)
+    assert m.consume(token).client_order_id  # now allowed
+
+
+def test_min_delay_off_by_default_even_in_live():
+    clock = Clock()
+    m = _live_mgr(clock)  # live_confirm_min_delay_sec defaults 0
+    token = m.issue_token(_spec(m))
+    assert m.consume(token).client_order_id  # immediate consume OK
+
+
+def test_release_pops_without_recording_spend():
+    clock = Clock()
+    m = _mgr(clock, daily_order_limit="999999999")
+    spec = _spec(m)
+    token = m.issue_token(spec)
+    m.release(token)
+    assert m._spent["KRW"] == Decimal("0")  # NOT recorded
+    with pytest.raises(GuardrailError) as e:
+        m.consume(token)  # token gone
+    assert e.value.code == "invalid-confirmation"
+
+
+def test_restore_spend_sums_todays_placed_by_currency():
+    s = Settings(_env_file=None)
+    m = SafetyManager(s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17))
+    events = [
+        {"ts": "2026-06-17T01:00:00+00:00", "decision": "placed", "notional": "700000", "currency": "KRW"},
+        {"ts": "2026-06-16T20:00:00+00:00", "decision": "placed", "notional": "300000", "currency": "KRW"},  # UTC yday -> KST 05:00 06-17 = today
+        {"ts": "2026-06-16T10:00:00+00:00", "decision": "placed", "notional": "999999", "currency": "KRW"},  # KST 19:00 06-16 = yesterday -> skip
+        {"ts": "2026-06-17T02:00:00+00:00", "decision": "placed", "notional": "100", "currency": "USD"},
+        {"ts": "2026-06-17T03:00:00+00:00", "decision": "previewed", "notional": "50000", "currency": "KRW"},  # not placed -> skip
+    ]
+    m.restore_spend(events)
+    assert m._spent["KRW"] == Decimal("1000000")  # 700,000 + 300,000
+    assert m._spent["USD"] == Decimal("100")
+
+
+def test_restore_spend_skips_malformed_events_without_crashing():
+    s = Settings(_env_file=None)
+    m = SafetyManager(s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17))
+    events = [
+        {"ts": "2026-06-17T01:00:00+00:00", "decision": "placed", "notional": "700000", "currency": "KRW"},
+        {"ts": "2026-06-17T02:00:00+00:00", "decision": "placed", "notional": "abc", "currency": "KRW"},  # bad value
+        [1, 2, 3],  # non-dict line
+        {"ts": "2026-06-17T03:00:00+00:00", "decision": "placed", "notional": "300000", "currency": "KRW"},
+    ]
+    m.restore_spend(events)  # must not raise
+    assert m._spent["KRW"] == Decimal("1000000")  # 700,000 + 300,000; bad ones skipped

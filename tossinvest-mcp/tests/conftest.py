@@ -76,7 +76,8 @@ class FakeClient:
 
     def get_order(self, order_id):
         self.calls.append(("get_order", order_id))
-        return {"orderId": order_id, "status": "PENDING"}
+        return {"orderId": order_id, "symbol": "005930", "side": "BUY",
+                "orderType": "LIMIT", "quantity": "10", "price": "70000", "status": "PENDING"}
 
     def place_order(self, **kwargs):
         from pytossinvest.models import OrderResponse

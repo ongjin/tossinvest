@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-MIT-3da639)
-![tests](https://img.shields.io/badge/tests-42%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-46%20passing-2ea44f)
 ![status](https://img.shields.io/badge/Toss%20API-pre--launch-f0ad4e)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -24,8 +24,8 @@
 | 🚦 **클라이언트단 레이트리미터** | 10개 그룹별 토큰버킷이 요청 속도를 조절. **09:00–09:10 KST 개장 동시호가 10분간 ORDER/ORDER_INFO 반토막**(6→3) 반영. |
 | 🔁 **멱등성** | `clientOrderId` 로 중복주문 방지 — 네트워크 단절로 응답을 못 받아도 같은 키로 재시도하면 두 번 체결되지 않음(서버측 ~10분 유효). |
 | 🧩 **에러는 `code` 로 분기** | `message` 가 비어도 OK. 서버가 **모르는 code/enum 을 추가해도 안 깨짐**(관용적 파싱). |
-| 🔐 **토큰 생애주기** | 만료 30초 전까지 메모리 캐싱·자동 갱신, `401 expired-token` 시 1회 재발급 후 재시도. |
-| ✅ **라이브 키 없이 그린** | `pytest` → **42개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
+| 🔐 **토큰 생애주기** | 만료 30초 전까지 메모리 캐싱·자동 갱신(`expires_in` 이 30초 이하라도 과거 시각으로 뭉개지지 않게 `max(0, …)` 클램프), `401 expired-token` 시 1회 재발급 후 재시도. |
+| ✅ **라이브 키 없이 그린** | `pytest` → **46개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
 
 ---
 
@@ -160,7 +160,7 @@ cancel_order(order_id) -> dict
 1. **레이트 게이트** — 해당 그룹 토큰버킷에서 토큰을 얻을 때까지 `sleep`. 피크시간(09:00–09:10 KST)엔 ORDER/ORDER_INFO 버킷을 반토막.
 2. **인증** — `Authorization: Bearer {token}` (TokenManager 가 캐싱·갱신).
 3. **계좌 헤더** — `account=True` 엔드포인트는 `X-Tossinvest-Account: {accountSeq}` 부착. `accountSeq` 가 없으면 `RuntimeError` → **`get_accounts()` 를 먼저 호출**해야 합니다.
-4. **언래핑** — `200` 이면 `resp.json()["result"]` 를 반환(토큰 엔드포인트 제외).
+4. **언래핑** — `200` 이면 `resp.json()["result"]` 를 반환(토큰 엔드포인트 제외). 바디가 **비-JSON 이거나 `result` 키가 없으면** `TossInvestError`(`invalid-response` / `missing-result`)로 거부 — `None` 을 조용히 순회하다 `TypeError` 로 깨지지 않게.
 5. **401 재시도** — `code == "expired-token"` 이면 토큰을 무효화하고 **1회** 재발급 후 재시도.
 6. 그 외 비2xx → `code` 기반 예외로 변환해 raise.
 
@@ -233,7 +233,7 @@ except BusinessRuleError as e:
 ## 테스트
 
 ```bash
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 42 passing
+uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 46 passing
 ```
 
 `respx` 로 httpx 를 mock 합니다 — **라이브 키 불필요, 네트워크 0**. `git clone && uv sync && pytest` 면 그린.

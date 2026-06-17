@@ -28,17 +28,23 @@ class Settings(BaseSettings):
     deny_symbols: list[str] = []
     enforce_market_hours: bool = True
 
+    max_order_amount_usd: Decimal = Decimal("1000")
+    daily_order_limit_usd: Decimal = Decimal("5000")
+
     # paper engine
     paper_starting_cash: Decimal = Decimal("10000000")
 
     # preview -> confirm window
     confirmation_ttl_sec: int = 120
+    # live-only: minimum seconds between preview and place (0 = off). 권장 live+수동 5.
+    live_confirm_min_delay_sec: int = 0
 
     # audit
     audit_log_path: str = "tossinvest-mcp-audit.log"
 
     @field_validator(
-        "max_order_amount", "daily_order_limit", "paper_starting_cash", mode="before"
+        "max_order_amount", "daily_order_limit", "paper_starting_cash",
+        "max_order_amount_usd", "daily_order_limit_usd", mode="before",
     )
     @classmethod
     def _no_float(cls, v):

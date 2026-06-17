@@ -88,3 +88,16 @@ def test_non_json_error_body_still_raises_oauth_error():
     with pytest.raises(OAuthError) as exc:
         mgr.get_token()
     assert exc.value.http_status == 502
+
+
+@respx.mock
+def test_short_expiry_is_clamped_not_in_past():
+    clock = FakeClock()  # t = 1000.0
+    respx.post(f"{BASE}/oauth2/token").mock(
+        return_value=httpx.Response(200, json={
+            "access_token": "tok", "token_type": "Bearer", "expires_in": 10})  # 10 < buffer(30)
+    )
+    mgr, _ = _mgr(clock)
+    mgr.get_token()
+    # without clamp: 1000 + 10 - 30 = 980 (< issue time). with clamp: 1000 + max(0,-20) = 1000.
+    assert mgr._expires_at >= 1000.0

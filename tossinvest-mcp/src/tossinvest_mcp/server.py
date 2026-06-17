@@ -24,6 +24,7 @@ def build_app_context(settings: Settings, *, client) -> AppContext:
         today=lambda: datetime.now(_KST).date(),
     )
     audit = AuditLog(settings.audit_log_path)
+    safety.restore_spend(audit.read_events())  # rebuild today's spend across restarts
     return AppContext(
         config=settings, client=client, paper=paper, safety=safety, audit=audit,
         now_kst=lambda: datetime.now(_KST),
@@ -108,12 +109,20 @@ def _register_writes(mcp: FastMCP, app: AppContext) -> None:
     def place_order(confirmation_token: str) -> dict:
         return T.place_order(app, confirmation_token=confirmation_token)
 
+    @mcp.tool(name="preview_modify",
+              description="STEP 1 of 2 to modify a LIVE open order. Merges the amendment with the "
+                          "original order, validates it against guardrails, and returns a "
+                          "confirmation_token. live only. Money/quantity are strings.")
+    def preview_modify(order_id: str, order_type: str, price: "str | None" = None,
+                       quantity: "str | None" = None, confirm_high_value_order: bool = False) -> dict:
+        return T.preview_modify(app, order_id, order_type=order_type, price=price,
+                                quantity=quantity, confirm_high_value_order=confirm_high_value_order)
+
     @mcp.tool(name="modify_order",
-              description="Modify an open order (live only; returns a NEW orderId). US orders: price only.")
-    def modify_order(order_id: str, order_type: str, price: "str | None" = None,
-                     quantity: "str | None" = None, confirm_high_value_order: bool = False) -> dict:
-        return T.modify_order(app, order_id, order_type=order_type, price=price,
-                              quantity=quantity, confirm_high_value_order=confirm_high_value_order)
+              description="STEP 2 of 2. Apply the modification validated by preview_modify, using its "
+                          "confirmation_token (returns a NEW orderId). live only; idempotent.")
+    def modify_order(confirmation_token: str) -> dict:
+        return T.modify_order(app, confirmation_token=confirmation_token)
 
     @mcp.tool(name="cancel_order",
               description="Cancel an open order (live only; returns a NEW orderId).")

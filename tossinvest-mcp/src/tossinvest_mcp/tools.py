@@ -182,6 +182,9 @@ def preview_order(app: AppContext, *, symbol: str, side: str, order_type: str,
 
 def place_order(app: AppContext, *, confirmation_token: str) -> dict:
     spec = app.safety.consume(confirmation_token)  # validates exists + not expired
+    # re-check amount guardrails against the now-updated daily spend (idempotency-safe:
+    # rejection happens before any execution, so the token is not finalized)
+    app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False)
     try:
         if app.use_paper:
             if spec.price is not None:
@@ -222,22 +225,73 @@ def place_order(app: AppContext, *, confirmation_token: str) -> dict:
     app.audit.record({
         "tool": "place_order", "mode": app.config.mode, "decision": "placed",
         "result": result, "clientOrderId": spec.client_order_id,
+        "currency": spec.currency, "notional": spec.notional,
     })
     return result
 
 
-def modify_order(app: AppContext, order_id: str, *, order_type: str,
-                 price: "str | None" = None, quantity: "str | None" = None,
-                 confirm_high_value_order: bool = False) -> dict:
+def preview_modify(app: AppContext, order_id: str, *, order_type: str,
+                   price: "str | None" = None, quantity: "str | None" = None,
+                   confirm_high_value_order: bool = False) -> dict:
     if app.use_paper:
         from .paper import PaperError
         raise PaperError("paper mode fills orders immediately; modify is live-only")
-    result = app.client.modify_order(
-        order_id, order_type=order_type, price=price, quantity=quantity,
-        confirm_high_value_order=confirm_high_value_order,
+    original = app.client.get_order(order_id)
+    symbol = original.get("symbol")
+    side = original.get("side")
+    merged_price = price if price is not None else original.get("price")
+    merged_qty = quantity if quantity is not None else original.get("quantity")
+    spec = app.safety.build_spec(
+        symbol=symbol, side=side, order_type=order_type,
+        quantity=merged_qty, price=merged_price,
+        confirm_high_value_order=confirm_high_value_order, modify_order_id=order_id,
     )
-    app.audit.record({"tool": "modify_order", "mode": app.config.mode,
-                      "decision": "modified", "orderId": order_id, "result": result})
+    is_open, enforce = _market_gate(app, symbol)
+    app.safety.check_guardrails(spec, is_market_open=is_open, enforce_hours=enforce,
+                                check_daily=False)  # M1: per-order gated, no daily bucket
+    token = app.safety.issue_token(spec)
+    app.audit.record({
+        "tool": "preview_modify", "mode": app.config.mode, "decision": "modify_previewed",
+        "orderId": order_id, "previousStatus": original.get("status"),
+        "symbol": symbol, "side": side, "notional": spec.notional,
+        "clientOrderId": spec.client_order_id, "token": token,
+    })
+    return {
+        "confirmationToken": token,
+        "orderId": order_id,
+        "symbol": symbol,
+        "side": side,
+        "orderType": order_type,
+        "estimatedNotional": str(spec.notional),
+        "expiresInSec": app.config.confirmation_ttl_sec,
+        "mode": app.config.mode,
+    }
+
+
+def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
+    spec = app.safety.consume(confirmation_token)  # validates exists + not expired
+    # re-check amount guardrails on the amended order (M1: no daily bucket add/check)
+    app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
+    try:
+        result = app.client.modify_order(
+            spec.modify_order_id, order_type=spec.order_type,
+            price=spec.price, quantity=spec.quantity,
+            confirm_high_value_order=spec.confirm_high_value_order,
+        )
+    except Exception as e:
+        app.audit.record({
+            "tool": "modify_order", "mode": app.config.mode, "decision": "error",
+            "error": str(e), "orderId": spec.modify_order_id,
+            "clientOrderId": spec.client_order_id,
+        })
+        raise  # token NOT released -> idempotent retry reuses same clientOrderId
+
+    app.safety.release(confirmation_token)  # pop only, no daily accrual (M1)
+    app.audit.record({
+        "tool": "modify_order", "mode": app.config.mode, "decision": "modified",
+        "orderId": spec.modify_order_id, "result": result,
+        "clientOrderId": spec.client_order_id,
+    })
     return result
 
 
@@ -245,7 +299,9 @@ def cancel_order(app: AppContext, order_id: str) -> dict:
     if app.use_paper:
         from .paper import PaperError
         raise PaperError("paper mode fills orders immediately; cancel is live-only")
+    previous = app.client.get_order(order_id)
     result = app.client.cancel_order(order_id)
     app.audit.record({"tool": "cancel_order", "mode": app.config.mode,
-                      "decision": "canceled", "orderId": order_id, "result": result})
+                      "decision": "canceled", "orderId": order_id,
+                      "previousStatus": previous.get("status"), "result": result})
     return result
