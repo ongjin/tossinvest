@@ -139,3 +139,25 @@ def test_restore_spend_skips_malformed_events_without_crashing():
     ]
     m.restore_spend(events)  # must not raise
     assert m._spent["KRW"] == Decimal("1000000")  # 700,000 + 300,000; bad ones skipped
+
+
+def test_restore_spend_includes_modify_deltas():
+    s = Settings(_env_file=None)
+    m = SafetyManager(s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17))
+    events = [
+        {"ts": "2026-06-17T01:00:00+00:00", "decision": "placed", "notional": "700000", "currency": "KRW"},
+        {"ts": "2026-06-17T02:00:00+00:00", "decision": "modified", "notional": "10000", "currency": "KRW"},
+    ]
+    m.restore_spend(events)
+    assert m._spent["KRW"] == Decimal("710000")  # placed + modify delta
+
+
+def test_restore_spend_floors_negative_modify_deltas():
+    s = Settings(_env_file=None)
+    m = SafetyManager(s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17))
+    events = [
+        {"ts": "2026-06-17T01:00:00+00:00", "decision": "placed", "notional": "100000", "currency": "KRW"},
+        {"ts": "2026-06-17T02:00:00+00:00", "decision": "modified", "notional": "-300000", "currency": "KRW"},
+    ]
+    m.restore_spend(events)
+    assert m._spent["KRW"] == Decimal("0")  # floored, not negative

@@ -191,7 +191,7 @@ class SafetyManager:
         self._roll_daily()
         today = self._today()
         for ev in events:
-            if not isinstance(ev, dict) or ev.get("decision") != "placed":
+            if not isinstance(ev, dict) or ev.get("decision") not in ("placed", "modified"):
                 continue
             notional = ev.get("notional")
             ts = ev.get("ts")
@@ -206,6 +206,8 @@ class SafetyManager:
                 continue
             currency = ev.get("currency", "KRW")
             self._spent[currency] = self._spent.get(currency, Decimal("0")) + amount
+        for cur in self._spent:
+            self._spent[cur] = max(Decimal("0"), self._spent[cur])
 
     def issue_token(self, spec: OrderSpec) -> str:
         token = self._gen_id()

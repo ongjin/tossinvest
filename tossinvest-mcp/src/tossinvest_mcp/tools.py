@@ -272,7 +272,7 @@ def preview_modify(app: AppContext, order_id: str, *, order_type: str,
     app.audit.record({
         "tool": "preview_modify", "mode": app.config.mode, "decision": "modify_previewed",
         "orderId": order_id, "previousStatus": original.get("status"),
-        "symbol": symbol, "side": side, "notional": spec.notional,
+        "symbol": symbol, "side": side, "notional": spec.notional, "currency": spec.currency,
         "clientOrderId": spec.client_order_id, "token": token,
     })
     return {
