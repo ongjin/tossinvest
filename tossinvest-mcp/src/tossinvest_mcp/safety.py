@@ -93,6 +93,7 @@ class SafetyManager:
         confirm_high_value_order: bool = False,
         ref_price: "str | None" = None,
         modify_order_id: "str | None" = None,
+        currency: "str | None" = None,
     ) -> OrderSpec:
         for label, val in (("quantity", quantity), ("price", price), ("order_amount", order_amount)):
             if val is not None and to_decimal(val) <= 0:
@@ -119,7 +120,7 @@ class SafetyManager:
             symbol=symbol, side=side, order_type=order_type, quantity=quantity,
             price=price, order_amount=order_amount, time_in_force=time_in_force,
             confirm_high_value_order=confirm_high_value_order, notional=notional,
-            client_order_id=self._gen_id(), currency=order_currency(symbol),
+            client_order_id=self._gen_id(), currency=currency if currency is not None else order_currency(symbol),
             modify_order_id=modify_order_id,
         )
 

@@ -258,3 +258,18 @@ def test_canon_symbol_keeps_legit_dotted_symbol():
     assert e.value.code == "symbol-denied"
     # an unrelated dotted symbol is not blocked
     _ok(m, _spec(m, symbol="BF.B"))
+
+
+def test_build_spec_explicit_currency_overrides_symbol_shape():
+    m = _mgr()
+    # numeric symbol would default to KRW, but explicit currency wins
+    spec = m.build_spec(symbol="005930", side="BUY", order_type="LIMIT",
+                        quantity="1", price="100", currency="USD")
+    assert spec.currency == "USD"
+
+
+def test_build_spec_currency_none_falls_back_to_symbol_shape():
+    m = _mgr()
+    spec = m.build_spec(symbol="AAPL", side="BUY", order_type="MARKET",
+                        order_amount="100", currency=None)
+    assert spec.currency == "USD"  # symbol-shape fallback
