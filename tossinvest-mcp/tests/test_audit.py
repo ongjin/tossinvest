@@ -1,0 +1,37 @@
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
+
+from tossinvest_mcp.audit import AuditLog
+
+
+def _fixed_clock():
+    return datetime(2026, 6, 17, 1, 2, 3, tzinfo=timezone.utc)
+
+
+def test_record_appends_jsonl_with_timestamp(tmp_path):
+    path = tmp_path / "audit.log"
+    log = AuditLog(path, now=_fixed_clock)
+    log.record({"tool": "place_order", "decision": "placed"})
+    log.record({"tool": "preview_order", "decision": "previewed"})
+
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+    first = json.loads(lines[0])
+    assert first["tool"] == "place_order"
+    assert first["decision"] == "placed"
+    assert first["ts"] == "2026-06-17T01:02:03+00:00"
+
+
+def test_record_serializes_decimal(tmp_path):
+    path = tmp_path / "audit.log"
+    log = AuditLog(path, now=_fixed_clock)
+    log.record({"tool": "place_order", "notional": Decimal("70000")})
+    entry = json.loads(path.read_text(encoding="utf-8").strip())
+    assert entry["notional"] == "70000"
+
+
+def test_creates_parent_dir(tmp_path):
+    path = tmp_path / "nested" / "dir" / "audit.log"
+    AuditLog(path, now=_fixed_clock).record({"tool": "x"})
+    assert path.exists()
