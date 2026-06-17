@@ -13,7 +13,7 @@ from .errors import (
     ServerError,
     OAuthError,
 )
-from .models import Account, Price, BuyingPower, OrderResponse, HoldingsItem
+from .models import Account, Price, BuyingPower, OrderResponse
 from .money import to_decimal, decimal_to_str
 
 __all__ = [
@@ -33,7 +33,6 @@ __all__ = [
     "Price",
     "BuyingPower",
     "OrderResponse",
-    "HoldingsItem",
     "to_decimal",
     "decimal_to_str",
 ]

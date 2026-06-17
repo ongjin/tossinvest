@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import time as _time
+from datetime import datetime
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 import httpx
 
 from .auth import TokenManager
 from .errors import error_from_response
-from .ratelimit import TokenBucket
+from .ratelimit import TokenBucket, effective_rate
 
 __all__ = ["TossInvestClient"]
 
-# Base TPS per group (header values override at runtime; these are the documented defaults).
+_KST = ZoneInfo("Asia/Seoul")
+
+# Base TPS per group. v0.0.1 uses these static documented defaults plus peak-hour
+# halving (applied in _gate). Dynamic X-RateLimit-* header sync is not yet implemented
+# (tracked for v0.0.2); the bucket paces requests and 429s surface as RateLimitError.
 _GROUP_RATES: dict[str, float] = {
     "AUTH": 5,
     "ACCOUNT": 1,
@@ -36,10 +42,12 @@ class TossInvestClient:
         timeout: float = 10.0,
         sleep: Callable[[float], None] = _time.sleep,
         monotonic: Callable[[], float] = _time.monotonic,
+        now_kst: Callable[[], datetime] = lambda: datetime.now(_KST),
     ):
         self._http = httpx.Client(base_url=base_url, timeout=timeout)
         self._token = TokenManager(client_id, client_secret, http=self._http, now=monotonic)
         self._sleep = sleep
+        self._now_kst = now_kst
         self._buckets: dict[str, TokenBucket] = {
             g: TokenBucket(capacity=r, refill_per_sec=r, now=monotonic)
             for g, r in _GROUP_RATES.items()
@@ -59,6 +67,10 @@ class TossInvestClient:
         bucket = self._buckets.get(group)
         if bucket is None:
             return
+        # Apply peak-hour halving (09:00-09:10 KST for ORDER/ORDER_INFO).
+        rate = effective_rate(group, _GROUP_RATES[group], self._now_kst())
+        bucket.capacity = rate
+        bucket.refill_per_sec = rate
         while not bucket.try_acquire():
             self._sleep(bucket.time_until_available())
 

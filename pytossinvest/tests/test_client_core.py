@@ -82,6 +82,23 @@ def test_429_raises_rate_limit_error():
     assert exc.value.retry_after == 2.0
 
 
+def test_gate_applies_peak_hour_halving():
+    from datetime import datetime
+
+    peak = datetime(2026, 6, 17, 9, 5)  # inside 09:00-09:10 KST window
+    off = datetime(2026, 6, 17, 11, 0)
+
+    c_peak = TossInvestClient("cid", "secret", base_url=BASE, sleep=lambda s: None, now_kst=lambda: peak)
+    c_peak._gate("ORDER")
+    assert c_peak._buckets["ORDER"].capacity == 3  # 6 -> 3 during peak
+    c_peak._gate("MARKET_DATA")
+    assert c_peak._buckets["MARKET_DATA"].capacity == 10  # non-order group unaffected
+
+    c_off = TossInvestClient("cid", "secret", base_url=BASE, sleep=lambda s: None, now_kst=lambda: off)
+    c_off._gate("ORDER")
+    assert c_off._buckets["ORDER"].capacity == 6  # full rate outside window
+
+
 @respx.mock
 def test_non_json_error_body_raises_typed_error():
     from pytossinvest.errors import TossInvestError

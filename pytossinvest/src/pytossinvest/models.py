@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
-__all__ = ["Account", "Price", "BuyingPower", "OrderResponse", "HoldingsItem"]
+from .money import to_decimal
+
+__all__ = ["Account", "Price", "BuyingPower", "OrderResponse", "HoldingsItem", "Money"]
+
+# A Decimal that accepts the API's string (and int) values but rejects float,
+# preserving the SDK-wide "money is never a float" guarantee via money.to_decimal.
+Money = Annotated[Decimal, BeforeValidator(to_decimal)]
 
 
 class _Base(BaseModel):
@@ -19,14 +26,14 @@ class Account(_Base):
 
 class Price(_Base):
     symbol: str
-    last_price: Decimal = Field(alias="lastPrice")
+    last_price: Money = Field(alias="lastPrice")
     currency: str
     timestamp: str | None = None
 
 
 class BuyingPower(_Base):
     currency: str
-    cash_buying_power: Decimal = Field(alias="cashBuyingPower")
+    cash_buying_power: Money = Field(alias="cashBuyingPower")
 
 
 class OrderResponse(_Base):
@@ -39,6 +46,6 @@ class HoldingsItem(_Base):
     name: str
     market_country: str = Field(alias="marketCountry")
     currency: str
-    quantity: Decimal
-    last_price: Decimal = Field(alias="lastPrice")
-    average_purchase_price: Decimal = Field(alias="averagePurchasePrice")
+    quantity: Money
+    last_price: Money = Field(alias="lastPrice")
+    average_purchase_price: Money = Field(alias="averagePurchasePrice")

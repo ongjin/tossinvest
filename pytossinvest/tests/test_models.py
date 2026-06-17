@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+import pytest
+
 from pytossinvest.models import Account, Price, BuyingPower, OrderResponse, HoldingsItem
 
 
@@ -33,3 +35,9 @@ def test_holdings_item_decimal_quantity():
     )
     assert item.quantity == Decimal("10")
     assert item.average_purchase_price == Decimal("65000")
+
+
+def test_money_field_rejects_float():
+    # The "never float" guarantee must hold at the model boundary too.
+    with pytest.raises(Exception):
+        Price.model_validate({"symbol": "005930", "lastPrice": 70000.5, "currency": "KRW"})
