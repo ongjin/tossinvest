@@ -55,5 +55,5 @@ class TokenManager:
             raise oauth_error_from_response(resp.status_code, err_body)
         body = resp.json()
         self._token = body["access_token"]
-        self._expires_at = self._now() + float(body["expires_in"]) - _EXPIRY_BUFFER_SEC
+        self._expires_at = self._now() + max(0.0, float(body["expires_in"]) - _EXPIRY_BUFFER_SEC)
         return self._token
