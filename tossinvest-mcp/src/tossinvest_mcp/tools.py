@@ -182,6 +182,9 @@ def preview_order(app: AppContext, *, symbol: str, side: str, order_type: str,
 
 def place_order(app: AppContext, *, confirmation_token: str) -> dict:
     spec = app.safety.consume(confirmation_token)  # validates exists + not expired
+    # re-check amount guardrails against the now-updated daily spend (idempotency-safe:
+    # rejection happens before any execution, so the token is not finalized)
+    app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False)
     try:
         if app.use_paper:
             if spec.price is not None:

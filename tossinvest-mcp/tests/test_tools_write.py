@@ -90,3 +90,17 @@ def test_place_market_paper_no_ref_price_errors_without_corruption(app_factory, 
     # no corrupt zero-price fill happened
     assert app.paper.positions == {}
     assert str(app.paper.cash) == "10000000"
+
+
+def test_place_rechecks_daily_limit_after_other_fill(app_factory):
+    app = app_factory(mode="paper", daily_order_limit="1000000", max_order_amount="1000000")
+    pv1 = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                          quantity="10", price="70000")  # 700,000 (under limit individually)
+    pv2 = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                          quantity="10", price="70000")  # 700,000 (also under, at preview time)
+    T.place_order(app, confirmation_token=pv1["confirmationToken"])  # records 700,000
+    with pytest.raises(GuardrailError) as e:
+        T.place_order(app, confirmation_token=pv2["confirmationToken"])  # 1,400,000 > 1,000,000
+    assert e.value.code == "daily-limit"
+    # token NOT consumed -> still pending (idempotency preserved)
+    assert app.safety.consume(pv2["confirmationToken"]).client_order_id == pv2["clientOrderId"]
