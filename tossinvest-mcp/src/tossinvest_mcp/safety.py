@@ -135,3 +135,29 @@ class SafetyManager:
     def record_spend(self, notional: Decimal) -> None:
         self._roll_daily()
         self._spent += notional
+
+    def issue_token(self, spec: OrderSpec) -> str:
+        token = self._gen_id()
+        self._pending[token] = _Pending(
+            spec=spec, expires_at=self._now() + self._cfg.confirmation_ttl_sec
+        )
+        return token
+
+    def consume(self, token: str) -> OrderSpec:
+        pending = self._pending.get(token)
+        if pending is None:
+            raise GuardrailError(
+                "invalid-confirmation",
+                "unknown or already-used confirmation_token; run preview_order again",
+            )
+        if self._now() > pending.expires_at:
+            del self._pending[token]
+            raise GuardrailError(
+                "expired-confirmation",
+                "confirmation_token expired; run preview_order again",
+            )
+        return pending.spec
+
+    def finalize(self, token: str, notional: Decimal) -> None:
+        self._pending.pop(token, None)
+        self.record_spend(notional)
