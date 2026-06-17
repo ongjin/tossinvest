@@ -56,3 +56,7 @@ def test_usd_caps_default_and_decimal():
 def test_usd_caps_reject_float():
     with pytest.raises(Exception):
         _settings(max_order_amount_usd=1000.5)
+
+
+def test_live_confirm_min_delay_default_zero():
+    assert _settings().live_confirm_min_delay_sec == 0

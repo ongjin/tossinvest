@@ -50,6 +50,7 @@ class OrderSpec:
 class _Pending:
     spec: OrderSpec
     expires_at: float
+    issued_at: float
 
 
 class SafetyManager:
@@ -166,8 +167,9 @@ class SafetyManager:
 
     def issue_token(self, spec: OrderSpec) -> str:
         token = self._gen_id()
+        now = self._now()
         self._pending[token] = _Pending(
-            spec=spec, expires_at=self._now() + self._cfg.confirmation_ttl_sec
+            spec=spec, expires_at=now + self._cfg.confirmation_ttl_sec, issued_at=now
         )
         return token
 
@@ -176,13 +178,19 @@ class SafetyManager:
         if pending is None:
             raise GuardrailError(
                 "invalid-confirmation",
-                "unknown or already-used confirmation_token; run preview_order again",
+                "unknown or already-used confirmation_token; run preview again",
             )
         if self._now() > pending.expires_at:
             del self._pending[token]
             raise GuardrailError(
                 "expired-confirmation",
-                "confirmation_token expired; run preview_order again",
+                "confirmation_token expired; run preview again",
+            )
+        delay = self._cfg.live_confirm_min_delay_sec
+        if self._cfg.is_live and delay > 0 and self._now() - pending.issued_at < delay:
+            raise GuardrailError(
+                "confirm-too-soon",
+                f"live order must wait {delay}s after preview before placing",
             )
         return pending.spec
 
@@ -190,3 +198,7 @@ class SafetyManager:
         pending = self._pending.pop(token, None)
         currency = pending.spec.currency if pending else "KRW"
         self.record_spend(notional, currency)
+
+    def release(self, token: str) -> None:
+        """Drop a pending token without recording spend (modify: per-order gated, no daily bucket)."""
+        self._pending.pop(token, None)

@@ -79,3 +79,39 @@ def test_failed_place_leaves_token_for_idempotent_retry():
     # retry: same token still valid, same clientOrderId reused
     second = m.consume(token)
     assert first.client_order_id == second.client_order_id
+
+
+def _live_mgr(clock, **overrides):
+    s = Settings(_env_file=None, mode="live", allow_live=True,
+                 confirmation_ttl_sec=120, **overrides)
+    return SafetyManager(s, now=clock, today=lambda: date(2026, 6, 17))
+
+
+def test_live_min_delay_blocks_immediate_consume_then_allows():
+    clock = Clock()
+    m = _live_mgr(clock, live_confirm_min_delay_sec=5)
+    token = m.issue_token(_spec(m))
+    with pytest.raises(GuardrailError) as e:
+        m.consume(token)  # 0s since issue, < 5
+    assert e.value.code == "confirm-too-soon"
+    clock.advance(5)
+    assert m.consume(token).client_order_id  # now allowed
+
+
+def test_min_delay_off_by_default_even_in_live():
+    clock = Clock()
+    m = _live_mgr(clock)  # live_confirm_min_delay_sec defaults 0
+    token = m.issue_token(_spec(m))
+    assert m.consume(token).client_order_id  # immediate consume OK
+
+
+def test_release_pops_without_recording_spend():
+    clock = Clock()
+    m = _mgr(clock, daily_order_limit="999999999")
+    spec = _spec(m)
+    token = m.issue_token(spec)
+    m.release(token)
+    assert m._spent["KRW"] == Decimal("0")  # NOT recorded
+    with pytest.raises(GuardrailError) as e:
+        m.consume(token)  # token gone
+    assert e.value.code == "invalid-confirmation"

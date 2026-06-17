@@ -36,6 +36,8 @@ class Settings(BaseSettings):
 
     # preview -> confirm window
     confirmation_ttl_sec: int = 120
+    # live-only: minimum seconds between preview and place (0 = off). 권장 live+수동 5.
+    live_confirm_min_delay_sec: int = 0
 
     # audit
     audit_log_path: str = "tossinvest-mcp-audit.log"
