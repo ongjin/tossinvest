@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -22,6 +23,12 @@ MAX_ORDER_THRESHOLD_USD = Decimal("3000000")   # $3M: always rejected
 def order_currency(symbol: str) -> str:
     """Order currency by symbol shape: alphabetic = USD, numeric = KRW (no FX)."""
     return "USD" if symbol.isalpha() else "KRW"
+
+
+def _canon_symbol(s: str) -> str:
+    """Canonicalize a symbol for deny/allow matching: NFKC-fold, drop separator/control chars, uppercase."""
+    s = unicodedata.normalize("NFKC", s)
+    return "".join(ch for ch in s if unicodedata.category(ch)[0] not in ("Z", "C")).upper()
 
 
 class GuardrailError(Exception):
@@ -131,10 +138,10 @@ class SafetyManager:
             hard_ceiling = MAX_ORDER_THRESHOLD
             per_order_cap = to_decimal(cfg.max_order_amount)
             daily_cap = to_decimal(cfg.daily_order_limit)
-        sym = spec.symbol.strip().upper()
-        if cfg.deny_symbols and sym in {s.strip().upper() for s in cfg.deny_symbols}:
+        sym = _canon_symbol(spec.symbol)
+        if cfg.deny_symbols and sym in {_canon_symbol(s) for s in cfg.deny_symbols}:
             raise GuardrailError("symbol-denied", f"{spec.symbol} is in the deny list")
-        if cfg.allow_symbols and sym not in {s.strip().upper() for s in cfg.allow_symbols}:
+        if cfg.allow_symbols and sym not in {_canon_symbol(s) for s in cfg.allow_symbols}:
             raise GuardrailError("symbol-not-allowed", f"{spec.symbol} is not in the allow list")
         if spec.notional > hard_ceiling:
             raise GuardrailError(

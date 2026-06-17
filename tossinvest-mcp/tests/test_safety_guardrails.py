@@ -244,3 +244,20 @@ def test_allow_list_normalizes_symbol():
     m = _mgr(allow_symbols=["aapl"], max_order_amount_usd="999999999",
              daily_order_limit_usd="999999999")  # config lowercase
     _ok(m, _spec(m, symbol="AAPL"))       # must pass (normalized match)
+
+
+def test_deny_list_blocks_unicode_whitespace_and_fullwidth_evasion():
+    m = _mgr(deny_symbols=["AAPL"])
+    for evasion in [" AAPL", "AAPL​", "ＡＡＰＬ"]:  # NBSP, zero-width, fullwidth
+        with pytest.raises(GuardrailError) as e:
+            _ok(m, _spec(m, symbol=evasion, price="100"))
+        assert e.value.code == "symbol-denied", evasion
+
+
+def test_canon_symbol_keeps_legit_dotted_symbol():
+    m = _mgr(deny_symbols=["BRK.B"])
+    with pytest.raises(GuardrailError) as e:
+        _ok(m, _spec(m, symbol="brk.b", price="100"))   # normalized match
+    assert e.value.code == "symbol-denied"
+    # an unrelated dotted symbol is not blocked
+    _ok(m, _spec(m, symbol="BF.B"))
