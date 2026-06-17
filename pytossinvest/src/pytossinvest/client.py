@@ -100,7 +100,7 @@ class TossInvestClient:
         if resp.status_code == 200:
             try:
                 body = resp.json()
-            except ValueError:
+            except (ValueError, RecursionError):
                 raise TossInvestError(
                     "invalid-response", "200 response body was not valid JSON",
                     http_status=200,

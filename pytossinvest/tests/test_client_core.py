@@ -136,3 +136,15 @@ def test_200_missing_result_raises_missing_result():
     with pytest.raises(TossInvestError) as exc:
         c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
     assert exc.value.code == "missing-result"
+
+
+@respx.mock
+def test_200_deeply_nested_json_raises_invalid_response():
+    from pytossinvest.errors import TossInvestError
+    _token_route()
+    deep = b"[" * 50000 + b"]" * 50000  # exceeds recursion limit during json parse
+    respx.get(f"{BASE}/api/v1/prices").mock(return_value=httpx.Response(200, content=deep))
+    c = _client()
+    with pytest.raises(TossInvestError) as exc:
+        c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
+    assert exc.value.code == "invalid-response"
