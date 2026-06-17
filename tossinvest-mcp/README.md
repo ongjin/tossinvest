@@ -154,7 +154,7 @@ place_order(confirmation_token) ────────────┘
 >
 > **정정(modify)도 같은 토큰 게이트**: `preview_modify` 가 원주문을 조회해 정정 후 주문을 만들고 가드레일을 통과한 뒤 토큰을 발급, `modify_order(confirmation_token)` 가 실행합니다. 정정은 *기존 주문 금액의 변경*이라 일일 누적엔 가산하지 않되(주문당 상한이 매 정정을 묶음), 주문당·고액·하드실링 게이트는 정정 후 notional 에 적용됩니다.
 
-> notional(주문금액) 계산 우선순위: `order_amount` → `price × quantity` → `ref_price × quantity`(MARKET 추정가). 셋 다 불가능하면 `insufficient-order-params` 로 거부. `quantity`·`price`·`order_amount` 가 **0 이하면** `invalid-order-value` 로 거부합니다(음수 notional 이 상한을 통과하던 구멍 차단).
+> notional(주문금액) 계산 우선순위: `order_amount` → `price × quantity` → `ref_price × quantity`(MARKET 추정가). 셋 다 불가능하면 `insufficient-order-params`, `order_amount` 를 `price`/`quantity` 와 **함께** 주면 `invalid-order-params` 로 거부합니다. `quantity`·`price`·`order_amount` 가 **0 이하면** `invalid-order-value`(음수 notional 이 상한을 통과하던 구멍 차단).
 
 ---
 
@@ -169,6 +169,8 @@ place_order(confirmation_token) ────────────┘
 5. **주문당 상한 초과** → `order-amount-cap` *(통화별: `MAX_ORDER_AMOUNT` / `MAX_ORDER_AMOUNT_USD`)*
 6. **일일 누적 상한 초과** → `daily-limit` *(통화별 버킷: `DAILY_ORDER_LIMIT` / `DAILY_ORDER_LIMIT_USD`)*
 7. **장 마감**(live + `enforce_market_hours` 일 때만) → `market-closed`
+
+> **심볼 정규화**: deny/allow 비교 전 심볼을 **NFKC 정규화 + 공백·제어문자 제거 + 대문자화**합니다 — `Ａ Ａ Ｐ Ｌ` 같은 전각/구분자 트릭으로 deny 리스트를 빠져나가지 못하게.
 
 > notional 은 **주문 통화별**로 비교합니다 — 심볼이 영문이면 USD, 숫자면 KRW 의 상한·임계·일일 버킷을 씁니다(FX 환산 안 함). 일일 누적은 KST 날짜로 리셋되고, **서버 재시작 시 오늘자 감사 로그(JSONL)를 replay 해 통화별로 복원**됩니다(재시작으로 한도가 0 으로 풀리는 구멍 차단).
 

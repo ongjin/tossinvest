@@ -107,7 +107,7 @@ function draw(){
 
   // --- ② 2단계 주문 ---
   frame(60,404,1000,150,{dash:[9,8],stroke:"#1b6ec2"});
-  txt(76,428,"② 2단계 주문 — human-in-the-loop",{size:19,anchor:"start",color:"#1b4f72"});
+  txt(76,428,"② 2단계 주문 — human-in-the-loop  ·  정정(modify)도 preview_modify→modify_order",{size:18,anchor:"start",color:"#1b4f72"});
   box(150,448,250,92,PALETTE.yellow,["preview_order","가드레일 검사 · 예상비용"],{labelSize:19});
   arrow(400,494,520,494);  txt(560,482,"confirmation",{size:16,color:"#666"}); txt(560,500,"token",{size:16,color:"#666"});
   box(640,448,250,92,PALETTE.yellow,["place_order","token 必 · 멱등"],{labelSize:19});
@@ -117,12 +117,12 @@ function draw(){
 
   // --- ③ 가드레일 ---
   frame(60,606,1000,116,{dash:[9,8],stroke:"#2b8a3e"});
-  txt(76,630,"③ 가드레일 — paper · live 모두 적용",{size:19,anchor:"start",color:"#145a32"});
+  txt(76,630,"③ 가드레일 — paper · live 모두 · 통화별 KRW/USD",{size:19,anchor:"start",color:"#145a32"});
   box(80,646,148,60,PALETTE.green,["주문당 상한"],{labelSize:18});
   box(238,646,148,60,PALETTE.green,["일일 누적"],{labelSize:18});
   box(396,646,148,60,PALETTE.green,["allow / deny"],{labelSize:18});
-  box(554,646,148,60,PALETTE.orange,["1억↑ confirm"],{labelSize:17});
-  box(712,646,148,60,PALETTE.red,["30억↑ 거부"],{labelSize:17});
+  box(554,646,148,60,PALETTE.orange,["1억 / $100k↑","confirm"],{labelSize:16});
+  box(712,646,148,60,PALETTE.red,["30억 / $3M↑","거부"],{labelSize:16});
   box(870,646,148,60,PALETTE.blue,["장운영 (live)"],{labelSize:17});
 
   // --- 결과 ---
