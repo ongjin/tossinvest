@@ -110,3 +110,29 @@ def test_non_json_error_body_raises_typed_error():
     with pytest.raises(TossInvestError) as exc:
         c._request("GET", "/api/v1/prices", group="MARKET_DATA")
     assert exc.value.http_status == 502
+
+
+@respx.mock
+def test_200_non_json_body_raises_invalid_response():
+    from pytossinvest.errors import TossInvestError
+    _token_route()
+    respx.get(f"{BASE}/api/v1/prices").mock(
+        return_value=httpx.Response(200, text="not json")
+    )
+    c = _client()
+    with pytest.raises(TossInvestError) as exc:
+        c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
+    assert exc.value.code == "invalid-response"
+
+
+@respx.mock
+def test_200_missing_result_raises_missing_result():
+    from pytossinvest.errors import TossInvestError
+    _token_route()
+    respx.get(f"{BASE}/api/v1/prices").mock(
+        return_value=httpx.Response(200, json={"data": [1, 2, 3]})  # no "result" key
+    )
+    c = _client()
+    with pytest.raises(TossInvestError) as exc:
+        c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
+    assert exc.value.code == "missing-result"

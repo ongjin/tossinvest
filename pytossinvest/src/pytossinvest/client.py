@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from .auth import TokenManager
-from .errors import error_from_response
+from .errors import error_from_response, TossInvestError
 from .ratelimit import TokenBucket, effective_rate
 
 __all__ = ["TossInvestClient"]
@@ -98,7 +98,19 @@ class TossInvestClient:
         )
 
         if resp.status_code == 200:
-            return resp.json().get("result")
+            try:
+                body = resp.json()
+            except ValueError:
+                raise TossInvestError(
+                    "invalid-response", "200 response body was not valid JSON",
+                    http_status=200,
+                )
+            if "result" not in body:
+                raise TossInvestError(
+                    "missing-result", "200 response had no 'result' field",
+                    http_status=200,
+                )
+            return body["result"]
 
         try:
             body = resp.json()
