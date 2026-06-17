@@ -130,3 +130,16 @@ def test_restore_spend_sums_todays_placed_by_currency():
     m.restore_spend(events)
     assert m._spent["KRW"] == Decimal("1000000")  # 700,000 + 300,000
     assert m._spent["USD"] == Decimal("100")
+
+
+def test_restore_spend_skips_malformed_events_without_crashing():
+    s = Settings(_env_file=None)
+    m = SafetyManager(s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17))
+    events = [
+        {"ts": "2026-06-17T01:00:00+00:00", "decision": "placed", "notional": "700000", "currency": "KRW"},
+        {"ts": "2026-06-17T02:00:00+00:00", "decision": "placed", "notional": "abc", "currency": "KRW"},  # bad value
+        [1, 2, 3],  # non-dict line
+        {"ts": "2026-06-17T03:00:00+00:00", "decision": "placed", "notional": "300000", "currency": "KRW"},
+    ]
+    m.restore_spend(events)  # must not raise
+    assert m._spent["KRW"] == Decimal("1000000")  # 700,000 + 300,000; bad ones skipped

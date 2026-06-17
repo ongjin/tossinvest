@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Callable
 
 from pytossinvest.money import to_decimal
@@ -179,7 +179,7 @@ class SafetyManager:
         self._roll_daily()
         today = self._today()
         for ev in events:
-            if ev.get("decision") != "placed":
+            if not isinstance(ev, dict) or ev.get("decision") != "placed":
                 continue
             notional = ev.get("notional")
             ts = ev.get("ts")
@@ -187,12 +187,13 @@ class SafetyManager:
                 continue
             try:
                 ev_date = datetime.fromisoformat(ts).astimezone(_KST).date()
-            except (ValueError, TypeError):
+                amount = to_decimal(notional)
+            except (ValueError, TypeError, InvalidOperation):
                 continue
             if ev_date != today:
                 continue
             currency = ev.get("currency", "KRW")
-            self._spent[currency] = self._spent.get(currency, Decimal("0")) + to_decimal(notional)
+            self._spent[currency] = self._spent.get(currency, Decimal("0")) + amount
 
     def issue_token(self, spec: OrderSpec) -> str:
         token = self._gen_id()
