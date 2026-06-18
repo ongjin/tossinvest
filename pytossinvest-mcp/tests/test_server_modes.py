@@ -50,6 +50,8 @@ def test_build_server_restores_todays_spend(tmp_path):
     audit_path.write_text(
         f'{{"ts": "{ts}", "tool": "place_order", "decision": "placed", '
         f'"notional": "700000", "currency": "KRW"}}\n', encoding="utf-8")
+    from zoneinfo import ZoneInfo
     settings = Settings(_env_file=None, mode="paper", audit_log_path=str(audit_path))
     app = build_app_context(settings, client=FakeClient())
-    assert app.safety._spent["KRW"] == Decimal("700000")
+    today = datetime.now(ZoneInfo("Asia/Seoul")).date().isoformat()
+    assert app.safety.spend_store.current(today, "KRW") == Decimal("700000")

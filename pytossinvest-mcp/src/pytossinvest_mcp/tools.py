@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from .audit import AuditLog
 from .config import Settings
 from .paper import PaperBroker, PaperOrder
-from .safety import SafetyManager
+from .safety import GuardrailError, SafetyManager
 
 _KST = ZoneInfo("Asia/Seoul")
 
@@ -206,9 +206,10 @@ def preview_order(app: AppContext, *, symbol: str, side: str, order_type: str,
 
 def place_order(app: AppContext, *, confirmation_token: str) -> dict:
     spec = app.safety.consume(confirmation_token)  # validates exists + not expired
-    # re-check amount guardrails against the now-updated daily spend (idempotency-safe:
-    # rejection happens before any execution, so the token is not finalized)
-    app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False)
+    # re-check non-daily guardrails (per-order/high-value/hard-ceiling/deny-allow); daily handled by reserve
+    app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
+    if not app.safety.reserve(spec):
+        raise GuardrailError("daily-limit", "this order would push today's total over the cap")
     try:
         if app.use_paper:
             if spec.price is not None:
@@ -239,13 +240,14 @@ def place_order(app: AppContext, *, confirmation_token: str) -> dict:
             )
             result = {"orderId": resp.order_id, "clientOrderId": resp.client_order_id}
     except Exception as e:
+        app.safety.release(spec)
         app.audit.record({
             "tool": "place_order", "mode": app.config.mode, "decision": "error",
             "error": str(e), "clientOrderId": spec.client_order_id,
         })
-        raise  # token NOT finalized -> retry reuses same clientOrderId (idempotent)
+        raise  # token NOT committed -> idempotent retry reuses same clientOrderId
 
-    app.safety.finalize(confirmation_token, spec.notional)
+    app.safety.commit(confirmation_token)
     app.audit.record({
         "tool": "place_order", "mode": app.config.mode, "decision": "placed",
         "result": result, "clientOrderId": spec.client_order_id,
@@ -300,9 +302,10 @@ def preview_modify(app: AppContext, order_id: str, *, order_type: str,
 
 def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
     spec = app.safety.consume(confirmation_token)  # validates exists + not expired
-    # re-check amount guardrails on the amended order against the delta (M1: delta accounting)
-    app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False,
-                                check_daily=True, prev_notional=spec.prev_notional)
+    # re-check non-daily guardrails; daily handled by reserve (reserve uses signed delta via prev_notional)
+    app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
+    if not app.safety.reserve(spec):
+        raise GuardrailError("daily-limit", "this modify would push today's total over the cap")
     try:
         result = app.client.modify_order(
             spec.modify_order_id, order_type=spec.order_type,
@@ -310,15 +313,16 @@ def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
             confirm_high_value_order=spec.confirm_high_value_order,
         )
     except Exception as e:
+        app.safety.release(spec)
         app.audit.record({
             "tool": "modify_order", "mode": app.config.mode, "decision": "error",
             "error": str(e), "orderId": spec.modify_order_id,
             "clientOrderId": spec.client_order_id,
         })
-        raise  # token NOT finalized -> idempotent retry reuses same clientOrderId
+        raise
 
+    app.safety.commit(confirmation_token)
     delta = spec.notional - (spec.prev_notional or Decimal("0"))
-    app.safety.finalize(confirmation_token, delta)  # pop + accrue signed delta (floored)
     app.audit.record({
         "tool": "modify_order", "mode": app.config.mode, "decision": "modified",
         "orderId": spec.modify_order_id, "result": result,

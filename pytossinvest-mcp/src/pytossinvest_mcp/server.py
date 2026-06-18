@@ -10,6 +10,7 @@ from .audit import AuditLog
 from .config import Settings
 from .paper import PaperBroker
 from .safety import SafetyManager
+from .stores import MemoryTokenStore, MemorySpendStore
 from .tools import AppContext
 from . import tools as T
 
@@ -22,6 +23,8 @@ def build_app_context(settings: Settings, *, client) -> AppContext:
         settings,
         now=_time.monotonic,
         today=lambda: datetime.now(_KST).date(),
+        token_store=MemoryTokenStore(),
+        spend_store=MemorySpendStore(),
     )
     audit = AuditLog(settings.audit_log_path)
     safety.restore_spend(audit.read_events())  # rebuild today's spend across restarts
