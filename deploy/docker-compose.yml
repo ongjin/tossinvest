@@ -1,0 +1,32 @@
+# deploy/docker-compose.yml — single app instance + Redis (AOF on for durability).
+# Scale instances behind your own load balancer; state is shared via Redis.
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]   # AOF: spend/paper counters survive restart
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  mcp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      TOSSINVEST_TRANSPORT: http
+      TOSSINVEST_HTTP_HOST: 0.0.0.0
+      TOSSINVEST_HTTP_PORT: "8000"
+      TOSSINVEST_AUTH_TOKEN: ${TOSSINVEST_AUTH_TOKEN:?set TOSSINVEST_AUTH_TOKEN in .env}
+      TOSSINVEST_STATE_BACKEND: redis
+      TOSSINVEST_REDIS_URL: redis://redis:6379/0
+      TOSSINVEST_MODE: ${TOSSINVEST_MODE:-paper}
+      TOSSINVEST_CLIENT_ID: ${TOSSINVEST_CLIENT_ID:-}
+      TOSSINVEST_CLIENT_SECRET: ${TOSSINVEST_CLIENT_SECRET:-}
+    depends_on:
+      - redis
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+volumes:
+  redis-data:

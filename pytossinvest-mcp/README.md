@@ -78,6 +78,41 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 
 ---
 
+## HTTP 원격 모드 (Docker + Redis)
+
+로컬 stdio 대신 **Streamable-HTTP** 로 띄울 수 있습니다. `deploy/` 아래 Docker Compose 스택을 제공합니다 — 앱 인스턴스 1개 + Redis(AOF 활성화).
+
+> **기본값은 stdio 그대로.** `TOSSINVEST_TRANSPORT` 를 설정하지 않으면 종전과 동일하게 stdio 로 동작합니다 — 기존 Claude Desktop 사용자는 아무 것도 바꿀 필요 없습니다.
+
+### 빠른 시작
+
+```bash
+# remote http mode (single command, app + Redis)
+cd deploy
+cp .env.example .env   # then edit .env (set TOSSINVEST_AUTH_TOKEN, keys)
+docker compose up --build
+# → MCP Streamable-HTTP at http://localhost:8000/mcp  (Authorization: Bearer <token>)
+```
+
+### 필수 사항
+
+- **`TOSSINVEST_AUTH_TOKEN` 필수** — 이 값 없이는 http 모드로 서버가 부팅을 거부합니다. `.env.example` 을 `.env` 로 복사하고 충분히 긴 랜덤 값으로 설정하세요. **실제 `.env` 는 절대 커밋하지 마세요.**
+- **MCP 엔드포인트**: `http://<host>:8000/mcp`
+- **인증**: 모든 MCP 클라이언트 요청에 `Authorization: Bearer <token>` 헤더 필요. 헤더가 없거나 토큰이 틀리면 `401` 으로 거부합니다.
+
+### 설정 변수 (HTTP 관련)
+
+| 변수 | 기본값 | 의미 |
+|---|---|---|
+| `TRANSPORT` | `stdio` | `stdio` · `http` |
+| `HTTP_HOST` | `127.0.0.1` | 바인드 주소 (컨테이너 내부에선 `0.0.0.0`) |
+| `HTTP_PORT` | `8000` | 리슨 포트 |
+| `AUTH_TOKEN` | — | Bearer 토큰. **http 모드에서 필수** |
+| `STATE_BACKEND` | `memory` | `memory` · `redis` (http 모드에선 `redis` 권장) |
+| `REDIS_URL` | — | `redis://...` (STATE_BACKEND=redis 시 필요) |
+
+---
+
 ## 설정 (env, prefix `TOSSINVEST_`)
 
 | 변수 | 기본값 | 의미 |
