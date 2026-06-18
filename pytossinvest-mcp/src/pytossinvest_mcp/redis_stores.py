@@ -84,15 +84,15 @@ class RedisSpendStore:
     def _reserved_key(self, day: str) -> str:
         return f"reserved:{day}"
 
-    def _lock(self, day: str, currency: str):
+    def _lock(self, day: str):
         return self._r.lock(
-            f"lock:spend:{day}:{currency}",
+            f"lock:spend:{day}",
             timeout=self._lock_timeout,
             blocking_timeout=self._lock_timeout,
         )
 
     def reserve(self, day: str, currency: str, delta: Decimal, cap: Decimal, dedup_key: str) -> bool:
-        with self._lock(day, currency):
+        with self._lock(day):
             if self._r.sismember(self._reserved_key(day), dedup_key):
                 return True
             cur = to_decimal(self._r.get(self._spend_key(day, currency)) or "0")
@@ -104,7 +104,7 @@ class RedisSpendStore:
             return True
 
     def release(self, day: str, currency: str, delta: Decimal, dedup_key: str) -> None:
-        with self._lock(day, currency):
+        with self._lock(day):
             if not self._r.sismember(self._reserved_key(day), dedup_key):
                 return
             self._r.srem(self._reserved_key(day), dedup_key)
