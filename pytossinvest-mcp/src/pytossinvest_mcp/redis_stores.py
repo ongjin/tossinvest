@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from pytossinvest.money import to_decimal
 
+from .paper import PaperState, Position, PaperOrder
 from .safety import OrderSpec
 
 
@@ -120,3 +121,65 @@ class RedisSpendStore:
     def seed(self, day: str, currency: str, amount: Decimal) -> None:
         # Redis counters survive restarts; re-seeding from audit would double-count. No-op.
         return None
+
+
+def _paper_state_to_dict(state: PaperState) -> dict:
+    return {
+        "cash": str(state.cash),
+        "realized_pnl": str(state.realized_pnl),
+        "counter": state.counter,
+        "positions": {
+            s: {"quantity": str(p.quantity), "avg_price": str(p.avg_price)}
+            for s, p in state.positions.items()
+        },
+        "orders": [
+            {"order_id": o.order_id, "symbol": o.symbol, "side": o.side,
+             "order_type": o.order_type, "quantity": str(o.quantity),
+             "price": str(o.price), "status": o.status,
+             "client_order_id": o.client_order_id}
+            for o in state.orders
+        ],
+    }
+
+
+def _paper_state_from_dict(d: dict) -> PaperState:
+    return PaperState(
+        cash=to_decimal(d["cash"]),
+        realized_pnl=to_decimal(d["realized_pnl"]),
+        counter=d["counter"],
+        positions={
+            s: Position(quantity=to_decimal(p["quantity"]), avg_price=to_decimal(p["avg_price"]))
+            for s, p in d["positions"].items()
+        },
+        orders=[
+            PaperOrder(
+                order_id=o["order_id"], symbol=o["symbol"], side=o["side"],
+                order_type=o["order_type"], quantity=to_decimal(o["quantity"]),
+                price=to_decimal(o["price"]), status=o["status"],
+                client_order_id=o["client_order_id"],
+            )
+            for o in d["orders"]
+        ],
+    )
+
+
+class RedisPaperStore:
+    def __init__(self, client, *, starting_cash, key: str = "paper", lock_timeout: float = 5.0):
+        self._r = client
+        self._key = key
+        self._starting = to_decimal(starting_cash)
+        self._lock_timeout = lock_timeout
+
+    def lock(self):
+        return self._r.lock(f"lock:{self._key}", timeout=self._lock_timeout,
+                            blocking_timeout=self._lock_timeout)
+
+    def load(self) -> PaperState:
+        raw = self._r.get(self._key)
+        if raw is None:
+            return PaperState(cash=self._starting, positions={}, orders=[],
+                              realized_pnl=Decimal("0"), counter=0)
+        return _paper_state_from_dict(json.loads(raw))
+
+    def save(self, state: PaperState) -> None:
+        self._r.set(self._key, json.dumps(_paper_state_to_dict(state)))
