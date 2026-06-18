@@ -488,7 +488,7 @@ wheels = [
 
 [[package]]
 name = "pytossinvest"
-version = "0.0.1"
+version = "0.0.2"
 source = { editable = "pytossinvest" }
 dependencies = [
     { name = "httpx" },

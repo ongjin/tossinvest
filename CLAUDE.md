@@ -73,7 +73,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 
 **living (docs/claude/ — 코드 만지기 전 읽고, 만진 뒤 갱신):**
 - [docs/claude/tossinvest-open-api.md](docs/claude/tossinvest-open-api.md) — **토스 Open API 레퍼런스 (외부 스펙)**. 인증 2단(`X-Tossinvest-Account`)·엔드포인트 전체·요청/응답 스키마·enum·rate limit 10그룹·에러코드 전체표·주문 함정(멱등성 10분·고액확인·US 금액주문·OrderStatus 10종). 외부 API 사실관계가 필요할 때.
-- [docs/claude/pytossinvest-sdk.md](docs/claude/pytossinvest-sdk.md) — **SDK 내부구조**. 공개 API 표면(클라이언트·에러·모델·money), `_request` 오케스트레이션(언래핑·계좌헤더·401재시도·레이트게이트), 모듈별 책임·함정·v0.0.1 한계, 새 엔드포인트 추가 절차. `pytossinvest/` 코드 만질 때.
+- [docs/claude/pytossinvest-sdk.md](docs/claude/pytossinvest-sdk.md) — **SDK 내부구조**. 공개 API 표면(클라이언트·에러·모델·money), `_request` 오케스트레이션(언래핑·계좌헤더·401재시도·레이트게이트·헤더동기화·429재시도), 모듈별 책임·함정·레이트리밋/재시도 동작(v0.0.2), 새 엔드포인트 추가 절차. `pytossinvest/` 코드 만질 때.
 - [docs/claude/tossinvest-mcp.md](docs/claude/tossinvest-mcp.md) — **MCP 내부구조 + 안전 불변식**. 3모드 라우팅표, 가드레일 순서(통화별 임계), preview→place/modify 토큰 생애·멱등성, 14툴, 모듈별 함정(paper 즉시체결·MARKET 무가격·US 자정넘김·conftest import·통화판정·M1 modify·부팅복원), 새 툴 추가 절차. `tossinvest-mcp/` 코드 만질 때.
 
 **design history (docs/superpowers/ — 왜 이렇게 만들었나):**

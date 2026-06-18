@@ -8,7 +8,7 @@
 
 - 위치: `pytossinvest/src/pytossinvest/`
 - 테스트: `uv run --package pytossinvest --extra dev pytest pytossinvest/tests` (respx httpx mock, 59개, **라이브 키 불필요**)
-- 의존: `httpx`(sync), `pydantic` v2. 버전 v0.0.1.
+- 의존: `httpx`(sync), `pydantic` v2. 버전 v0.0.2.
 
 ## 레이어 (의존 방향: 위 → 아래)
 
