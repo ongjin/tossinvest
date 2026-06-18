@@ -46,9 +46,9 @@ TossInvestClient(client_id, client_secret, *,
 
 1. `_gate(group)` — 그룹 토큰버킷에서 토큰 획득까지 `sleep`. 피크시간(09:00–09:10 KST)엔 `effective_rate` 로 ORDER/ORDER_INFO 버킷 반토막(단, 해당 그룹이 헤더를 한 번이라도 받은 뒤엔 피크반토막 미적용).
 2. `Authorization: Bearer {token}` (TokenManager). `account=True` 면 `X-Tossinvest-Account: {accountSeq}` (없으면 RuntimeError → `get_accounts()` 먼저 호출 강제).
-3. 200 → 응답 헤더로 해당 그룹 버킷 동기화(`_sync_bucket_from_headers`). `resp.json()["result"]` 언래핑 반환.
+3. **응답 직후(상태코드 분기 전) → 응답 헤더로 해당 그룹 버킷 동기화(`_sync_bucket_from_headers`)**. 이어 200 이면 `resp.json()["result"]` 언래핑 반환.
 4. **401 + `code=="expired-token"` → `token.invalidate()` 후 1회 재시도**(429 카운터 보존).
-5. **429 + 잔여 시도 있음 → `backoff_wait(retry_after, attempt)` 만큼 sleep 후 같은 요청 재시도**(`_attempt` 파라미터로 횟수 추적). 소진 시 `RateLimitError` 던짐. **5xx·타임아웃은 재시도 안 함**.
+5. **429 + 잔여 시도 있음 → `backoff_wait(attempt, retry_after)` 만큼 sleep 후 같은 요청 재시도**(`_attempt` 파라미터로 횟수 추적). 소진 시 `RateLimitError` 던짐. **5xx·타임아웃은 재시도 안 함**.
 6. 그 외 비2xx → `error_from_response(status, body, headers)` 던짐.
 
 ## 모듈별 핵심 + 함정
@@ -56,7 +56,7 @@ TossInvestClient(client_id, client_secret, *,
 - **`money.py`**: `to_decimal(str|int|Decimal)→Decimal`. **`bool`·`float` 은 `TypeError`** (float 진입 경로 자체를 안 만듦). `decimal_to_str` = `format(v, "f")`(지수표기 방지). 돈/수량은 무조건 이걸 통과.
 - **`models.py`**: `Money = Annotated[Decimal, BeforeValidator(to_decimal)]` — pydantic 이 문자열→Decimal 강제하고 float 거부. `_Base` 는 `populate_by_name=True, extra="ignore"`(서버가 필드 추가해도 안 깨짐). 모델: `Account`(account_no/account_seq/account_type)·`Price`(last_price:Money)·`BuyingPower`(cash_buying_power:Money)·`OrderResponse`(order_id/client_order_id?)·`HoldingsItem`.
 - **`errors.py`**: `error_from_response` 가 **status→예외클래스** 매핑(400 Validation·401 Auth·403 Forbidden·404 NotFound·409 Conflict·422 BusinessRule·429 RateLimit). **모르는 status 는 ≥500 → ServerError, 그 외 → base `TossInvestError`**(안 깨짐). `code` 기본값 `"unknown"`. 토큰 엔드포인트만 `oauth_error_from_response`(OAuth2 포맷). `RateLimitError.retry_after` 는 429 의 `Retry-After` 헤더에서만 파싱.
-- **`ratelimit.py`**: `TokenBucket(capacity, refill_per_sec, now)` — `try_acquire(n=1)`/`time_until_available(n=1)`. `effective_rate(group, base, now_kst)` 가 `PEAK_GROUPS={ORDER, ORDER_INFO}` 를 09:00–09:10 KST 동안 반토막. **v0.0.2 구현**: `backoff_wait(retry_after, attempt, *, max_wait, rng)` 헬퍼(`Retry-After>0` 이면 그대로, 아니면 지수백오프+full jitter, `max_wait` 상한); `_sync_bucket_from_headers(group, headers)` 가 `X-RateLimit-Limit`→capacity, `1/X-RateLimit-Reset`→refill_per_sec, `min(_tokens, X-RateLimit-Remaining)`→_tokens 로 버킷 동기화, 헤더 없거나 파싱 불가면 no-op; 그룹별 `_rate_from_header` 플래그 — 헤더를 한 번 받은 그룹은 `_gate` 에서 피크반토막 미적용(헤더가 진실).
+- **`ratelimit.py`**: `TokenBucket(capacity, refill_per_sec, now)` — `try_acquire(n=1)`/`time_until_available(n=1)`. `effective_rate(group, base, now_kst)` 가 `PEAK_GROUPS={ORDER, ORDER_INFO}` 를 09:00–09:10 KST 동안 반토막. **v0.0.2 구현**: `backoff_wait(attempt, retry_after, *, base=1.0, cap, rng)` 헬퍼(`Retry-After>0` 이면 그대로, 아니면 지수백오프+full jitter, `cap` 상한); `_sync_bucket_from_headers(group, headers)` 가 `X-RateLimit-Limit`→capacity, `1/X-RateLimit-Reset`→refill_per_sec, `min(_tokens, X-RateLimit-Remaining)`→_tokens 로 버킷 동기화, 헤더 없거나 파싱 불가면 no-op; 그룹별 `_rate_from_header` 플래그 — 헤더를 한 번 받은 그룹은 `_gate` 에서 피크반토막 미적용(헤더가 진실).
 - **`auth.py`**: `TokenManager.get_token()` 이 `expires_in - 30s` 버퍼까지 메모리 캐싱. `invalidate()` 로 강제 재발급(client 의 401 재시도가 호출). `_fetch` 는 form-urlencoded, 비200 이면 `OAuthError`.
 
 ## 새 엔드포인트 추가 절차

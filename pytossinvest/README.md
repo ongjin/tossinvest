@@ -163,7 +163,7 @@ cancel_order(order_id) -> dict
 1. **레이트 게이트** — 해당 그룹 토큰버킷에서 토큰을 얻을 때까지 `sleep`. 피크시간(09:00–09:10 KST)엔 ORDER/ORDER_INFO 버킷을 반토막(단, 해당 그룹이 응답 헤더를 한 번이라도 받은 뒤엔 피크반토막 미적용).
 2. **인증** — `Authorization: Bearer {token}` (TokenManager 가 캐싱·갱신).
 3. **계좌 헤더** — `account=True` 엔드포인트는 `X-Tossinvest-Account: {accountSeq}` 부착. `accountSeq` 가 없으면 `RuntimeError` → **`get_accounts()` 를 먼저 호출**해야 합니다.
-4. **언래핑** — `200` 이면 응답 헤더로 버킷 동기화 후 `resp.json()["result"]` 를 반환(토큰 엔드포인트 제외). 바디가 **비-JSON·과도하게 중첩된 JSON(`RecursionError`)이거나 `result` 키가 없으면** `TossInvestError`(`invalid-response` / `missing-result`)로 거부 — `None` 을 조용히 순회하다 `TypeError` 로 깨지지 않게.
+4. **버킷 동기화 + 언래핑** — 응답을 받으면 (상태코드 무관) 헤더로 버킷 동기화. 이어 `200` 이면 `resp.json()["result"]` 를 반환(토큰 엔드포인트 제외). 바디가 **비-JSON·과도하게 중첩된 JSON(`RecursionError`)이거나 `result` 키가 없으면** `TossInvestError`(`invalid-response` / `missing-result`)로 거부 — `None` 을 조용히 순회하다 `TypeError` 로 깨지지 않게.
 5. **401 재시도** — `code == "expired-token"` 이면 토큰을 무효화하고 **1회** 재발급 후 재시도(429 카운터 보존).
 6. **429 bounded 재시도** — 잔여 시도 횟수가 있으면 `backoff_wait`(`Retry-After` 헤더가 있으면 그 값, 없으면 지수백오프+jitter) 만큼 sleep 후 같은 요청을 재시도. `max_retries` 소진 시 `RateLimitError` 던짐. **5xx·타임아웃은 재시도 안 함**.
 7. 그 외 비2xx → `code` 기반 예외로 변환해 raise.
