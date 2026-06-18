@@ -595,6 +595,9 @@ dev = [
     { name = "fakeredis", extra = ["lua"] },
     { name = "pytest" },
 ]
+redis = [
+    { name = "redis" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -603,8 +606,9 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytossinvest", editable = "pytossinvest" },
+    { name = "redis", marker = "extra == 'redis'", specifier = ">=5" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["dev", "redis"]
 
 [[package]]
 name = "pywin32"
