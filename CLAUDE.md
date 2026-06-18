@@ -39,7 +39,7 @@ uv sync --package pytossinvest-mcp --extra dev
 
 # 테스트
 uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (59) — respx mock
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (151) — FakeClient
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (161) — FakeClient
 
 # MCP 서버 실행 (stdio — Claude Desktop/Cursor 등 MCP 클라이언트용)
 TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
@@ -50,8 +50,8 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 
 - **money/quantity**: 전부 문자열/Decimal. float 진입 경로 자체를 안 만든다. (위 CRITICAL RULES)
 - **SDK 규약** (`pytossinvest`): 응답 `result` 자동 언래핑(토큰 엔드포인트 제외)·**`code` 기반 에러 분기**(unknown code 관용)·**`X-RateLimit-*` 헤더가 진실**(표 숫자 하드코딩 금지)·`accountSeq` 1회 캐싱(ACCOUNT 1/s)·**`clientOrderId` 멱등성 수동**(10분). v0.0.2: `X-RateLimit-*` 헤더로 버킷 동적 동기화(헤더가 진실 — 본 그룹은 피크반토막 미적용), 429 **bounded 자동 retry**(`Retry-After` 또는 지수백오프+jitter, `max_retries` 기본 3, `retry_max_wait` 60s 상한) 구현. **5xx·타임아웃은 비재시도**(호출자 책임). 소진 시 종전대로 `RateLimitError` throw.
-- **MCP 안전모델** (`pytossinvest-mcp`): 3모드 `TOSSINVEST_MODE` = `read_only`(주문툴 미등록) / **`paper`**(기본, `PaperBroker` 체결 — `PaperStore` 백엔드: memory 로컬 / redis 공유) / `live`(`TOSSINVEST_ALLOW_LIVE=1` 까지 있어야 켜짐 — config validator 가 이중게이트). 가드레일(**주문통화별** 주문당·일일 상한·allow/deny·고액 confirm 필수·하드실링 거부 — KRW 1억/30억, USD $10만/$300만, 알파벳=USD·숫자=KRW·FX 환산 X; 장시간 게이트는 live 전용). preview→place / preview_modify→modify 2단계 + **reserve-first 멱등성**(시도 시 원자적 예약 → 실패 시 release → 성공 시 commit; modify 도 부호있는 delta로 동형) + place 시 일일한도 재검사 + 부팅 시 감사로그로 당일 누적 복원 + 감사로그(JSONL). **상태 백엔드**: `TOSSINVEST_STATE_BACKEND`=`memory`(기본·단일인스턴스) / `redis`(`TOSSINVEST_REDIS_URL` 필요·HA) — `TokenStore`/`SpendStore`/`PaperStore` 심을 통해 교체 가능. redis 시 token/spend counter 가 진실의 원천(AOF), 부팅 복원 no-op. **paper 상태도 redis 로 외부화** — `RedisPaperStore`가 단일 JSON 키 `paper`에 저장(`lock:paper` 분산락), 다중 인스턴스 공유·재시작 생존.
-- **설정**: `pytossinvest-mcp` 는 `pydantic-settings`, env prefix `TOSSINVEST_` (`MODE`/`ALLOW_LIVE`/`CLIENT_ID`/`CLIENT_SECRET`/`MAX_ORDER_AMOUNT`/`DAILY_ORDER_LIMIT`/`ALLOW_SYMBOLS`/`DENY_SYMBOLS`/`ENFORCE_MARKET_HOURS`/`MAX_ORDER_AMOUNT_USD`/`DAILY_ORDER_LIMIT_USD`/`LIVE_CONFIRM_MIN_DELAY_SEC`/`STATE_BACKEND`/`REDIS_URL`). 상세는 `pytossinvest-mcp/README.md`.
+- **MCP 안전모델** (`pytossinvest-mcp`): 3모드 `TOSSINVEST_MODE` = `read_only`(주문툴 미등록) / **`paper`**(기본, `PaperBroker` 체결 — `PaperStore` 백엔드: memory 로컬 / redis 공유) / `live`(`TOSSINVEST_ALLOW_LIVE=1` 까지 있어야 켜짐 — config validator 가 이중게이트). 가드레일(**주문통화별** 주문당·일일 상한·allow/deny·고액 confirm 필수·하드실링 거부 — KRW 1억/30억, USD $10만/$300만, 알파벳=USD·숫자=KRW·FX 환산 X; 장시간 게이트는 live 전용). preview→place / preview_modify→modify 2단계 + **reserve-first 멱등성**(시도 시 원자적 예약 → 실패 시 release → 성공 시 commit; modify 도 부호있는 delta로 동형) + place 시 일일한도 재검사 + 부팅 시 감사로그로 당일 누적 복원 + 감사로그(JSONL). **상태 백엔드**: `TOSSINVEST_STATE_BACKEND`=`memory`(기본·단일인스턴스) / `redis`(`TOSSINVEST_REDIS_URL` 필요·HA) — `TokenStore`/`SpendStore`/`PaperStore` 심을 통해 교체 가능. redis 시 token/spend counter 가 진실의 원천(AOF), 부팅 복원 no-op. **paper 상태도 redis 로 외부화** — `RedisPaperStore`가 단일 JSON 키 `paper`에 저장(`lock:paper` 분산락), 다중 인스턴스 공유·재시작 생존. **트랜스포트 축**: `TOSSINVEST_TRANSPORT`=`stdio`(기본·무변경, `mcp.run()`) / `http`(원격, bearer 인증 필수 — `TOSSINVEST_AUTH_TOKEN` 없이 부팅 거부). mode/state_backend 와 독립(직교).
+- **설정**: `pytossinvest-mcp` 는 `pydantic-settings`, env prefix `TOSSINVEST_` (`MODE`/`ALLOW_LIVE`/`CLIENT_ID`/`CLIENT_SECRET`/`MAX_ORDER_AMOUNT`/`DAILY_ORDER_LIMIT`/`ALLOW_SYMBOLS`/`DENY_SYMBOLS`/`ENFORCE_MARKET_HOURS`/`MAX_ORDER_AMOUNT_USD`/`DAILY_ORDER_LIMIT_USD`/`LIVE_CONFIRM_MIN_DELAY_SEC`/`STATE_BACKEND`/`REDIS_URL`/`TRANSPORT`/`HTTP_HOST`/`HTTP_PORT`/`AUTH_TOKEN`). 상세는 `pytossinvest-mcp/README.md`.
 - **라이선스**: SDK=**MIT**, MCP=**Apache-2.0**. 각 패키지에 `LICENSE`(+MCP `NOTICE`) + `pyproject.toml` `license` 필드. README 에 명시. "비공식(unofficial) 클라이언트" 표기로 토스 상표/엔도르스먼트 오해 방지.
 
 ## 주의할 함정 (이미 겪었거나 설계로 막은 것)
@@ -71,7 +71,8 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 - **redis 일일 카운터는 Decimal 문자열 + 분산락 RMW** — day-scope key에 `Lock` + Python Decimal RMW. `INCR`/`INCRBYFLOAT` 금지(돈/수량 float 규칙 동일 적용).
 - **`fakeredis[lua]` 필수** — redis-py `Lock.release()`는 내부적으로 EVALSHA(Lua)를 사용. fakeredis 의 lua 서브패키지가 없으면 Lock.release()에서 `ResponseError` 발생. 실제 Redis 에는 Lua가 기본 내장.
 - **redis 백엔드에서 `restore_spend`/`seed` 는 no-op** — redis counter 가 진실의 원천(AOF). memory 백엔드만 부팅 시 감사 리플레이로 복원. redis 백엔드에서 감사 파일을 지워도 counter는 유지된다.
-- **PaperStore 심 — memory|redis** — `PaperBroker`는 `PaperStore` 인터페이스(`lock()/load()/save()`)를 통해 상태를 읽고 쓴다. `MemoryPaperStore`(기본, 인스턴스 로컬·재시작 휘발) / `RedisPaperStore`(redis 백엔드 선택 시, 단일 JSON 키 `paper` + `lock:paper` 분산락, 다중 인스턴스 공유·재시작 생존). `PaperState`(cash·positions·orders·realized_pnl·counter) 직렬화 시 모든 금액은 Decimal 문자열. `place()` 는 `clientOrderId` 멱등 — 락 안에서 중복 체결 방지(기존 주문 반환). transport는 현재 stdio 단일.
+- **PaperStore 심 — memory|redis** — `PaperBroker`는 `PaperStore` 인터페이스(`lock()/load()/save()`)를 통해 상태를 읽고 쓴다. `MemoryPaperStore`(기본, 인스턴스 로컬·재시작 휘발) / `RedisPaperStore`(redis 백엔드 선택 시, 단일 JSON 키 `paper` + `lock:paper` 분산락, 다중 인스턴스 공유·재시작 생존). `PaperState`(cash·positions·orders·realized_pnl·counter) 직렬화 시 모든 금액은 Decimal 문자열. `place()` 는 `clientOrderId` 멱등 — 락 안에서 중복 체결 방지(기존 주문 반환). transport는 `stdio`(기본) 또는 `http`(원격).
+- **http 트랜스포트 함정** — `TOSSINVEST_TRANSPORT=http` 로 부팅 시 `TOSSINVEST_AUTH_TOKEN` 미설정이면 config validator 가 `ValueError`로 거부(live/redis 이중게이트와 동형 삼중 fail-closed). bearer 는 `hmac.compare_digest` 상수시간 비교(타이밍 공격 방지). MCP 엔드포인트는 `/mcp`(Streamable HTTP, `stateless_http=True`). uvicorn 은 옵션 `[http]` extra — `serve_http` 안에서만 import(stdio 설치·테스트 스위트는 uvicorn 불필요). 단일테넌트 — 토큰은 엔드포인트 인증일 뿐, Redis 미저장·Toss 자격증명 아님.
 
 ## 추가 문서 (docs/)
 
