@@ -39,3 +39,40 @@ class AuditLog:
                 except ValueError:
                     continue
         return events
+
+
+class RedisAuditSink:
+    """Append-only audit via a Redis stream. Same surface as AuditLog."""
+
+    def __init__(
+        self,
+        client,
+        *,
+        stream: str = "audit",
+        maxlen: int = 100_000,
+        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    ):
+        self._r = client
+        self._stream = stream
+        self._maxlen = maxlen
+        self._now = now
+
+    def record(self, event: dict) -> None:
+        entry = {"ts": self._now().isoformat(), **event}
+        flat = {
+            k: json.dumps(v, ensure_ascii=False, default=str)
+            for k, v in entry.items()
+        }
+        self._r.xadd(self._stream, flat, maxlen=self._maxlen, approximate=True)
+
+    def read_events(self) -> list[dict]:
+        out = []
+        for _id, fields in self._r.xrange(self._stream):
+            ev = {}
+            for k, v in fields.items():
+                try:
+                    ev[k] = json.loads(v)
+                except (ValueError, TypeError):
+                    ev[k] = v
+            out.append(ev)
+        return out

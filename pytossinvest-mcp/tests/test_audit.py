@@ -2,7 +2,11 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import pytest
+
 from pytossinvest_mcp.audit import AuditLog
+
+fakeredis = pytest.importorskip("fakeredis")
 
 
 def _fixed_clock():
@@ -50,3 +54,19 @@ def test_read_events_parses_and_skips_blank(tmp_path):
 
 def test_read_events_missing_file_is_empty(tmp_path):
     assert AuditLog(tmp_path / "nope.log").read_events() == []
+
+
+def test_redis_audit_record_and_read():
+    from pytossinvest_mcp.audit import RedisAuditSink
+
+    r = fakeredis.FakeStrictRedis(decode_responses=True)
+    sink = RedisAuditSink(
+        r,
+        now=lambda: datetime(2026, 6, 18, tzinfo=timezone.utc),
+    )
+    sink.record({"tool": "place_order", "decision": "placed", "notional": "100"})
+    events = sink.read_events()
+    assert len(events) == 1
+    assert events[0]["decision"] == "placed"
+    assert events[0]["notional"] == "100"
+    assert events[0]["ts"].startswith("2026-06-18")
