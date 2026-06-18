@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, time
 from typing import Callable
 
-__all__ = ["TokenBucket", "effective_rate", "PEAK_GROUPS"]
+__all__ = ["TokenBucket", "effective_rate", "backoff_wait", "PEAK_GROUPS"]
 
 PEAK_GROUPS = {"ORDER", "ORDER_INFO"}
 _PEAK_START = time(9, 0)
@@ -50,3 +50,20 @@ def effective_rate(group: str, base_rate: float, now_kst: datetime) -> float:
     if group in PEAK_GROUPS and _PEAK_START <= now_kst.time() < _PEAK_END:
         return base_rate / 2
     return base_rate
+
+
+def backoff_wait(
+    attempt: int,
+    retry_after: "float | None",
+    *,
+    base: float = 1.0,
+    cap: float,
+    rng: Callable[[], float],
+) -> float:
+    """Seconds to wait before a 429 retry. Honors Retry-After (>0); else exponential
+    backoff (base * 2**attempt) with full jitter. Clamped to cap to avoid unbounded waits."""
+    if retry_after is not None and retry_after > 0:
+        wait = retry_after
+    else:
+        wait = base * (2 ** attempt) * rng()
+    return min(wait, cap)

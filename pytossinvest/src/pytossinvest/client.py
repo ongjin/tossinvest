@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import time as _time
 from datetime import datetime
 from typing import Any, Callable
@@ -9,15 +10,16 @@ import httpx
 
 from .auth import TokenManager
 from .errors import error_from_response, TossInvestError
-from .ratelimit import TokenBucket, effective_rate
+from .ratelimit import TokenBucket, effective_rate, backoff_wait
 
 __all__ = ["TossInvestClient"]
 
 _KST = ZoneInfo("Asia/Seoul")
 
-# Base TPS per group. v0.0.1 uses these static documented defaults plus peak-hour
-# halving (applied in _gate). Dynamic X-RateLimit-* header sync is not yet implemented
-# (tracked for v0.0.2); the bucket paces requests and 429s surface as RateLimitError.
+# Seed TPS per group: static documented defaults used until the server's
+# X-RateLimit-* headers are seen, which then reconcile the bucket (header is the
+# source of truth) and suppress peak-halving for that group. 429s are auto-retried
+# (bounded); RateLimitError surfaces only once retries are exhausted.
 _GROUP_RATES: dict[str, float] = {
     "AUTH": 5,
     "ACCOUNT": 1,
@@ -43,16 +45,23 @@ class TossInvestClient:
         sleep: Callable[[float], None] = _time.sleep,
         monotonic: Callable[[], float] = _time.monotonic,
         now_kst: Callable[[], datetime] = lambda: datetime.now(_KST),
+        max_retries: int = 3,
+        retry_max_wait: float = 60.0,
+        rng: Callable[[], float] = random.random,
     ):
         self._http = httpx.Client(base_url=base_url, timeout=timeout)
         self._token = TokenManager(client_id, client_secret, http=self._http, now=monotonic)
         self._sleep = sleep
         self._now_kst = now_kst
+        self._max_retries = max_retries
+        self._retry_max_wait = retry_max_wait
+        self._rng = rng
         self._buckets: dict[str, TokenBucket] = {
             g: TokenBucket(capacity=r, refill_per_sec=r, now=monotonic)
             for g, r in _GROUP_RATES.items()
         }
         self._account_seq: int | None = None
+        self._rate_from_header: dict[str, bool] = {}
 
     def close(self) -> None:
         self._http.close()
@@ -67,12 +76,38 @@ class TossInvestClient:
         bucket = self._buckets.get(group)
         if bucket is None:
             return
-        # Apply peak-hour halving (09:00-09:10 KST for ORDER/ORDER_INFO).
-        rate = effective_rate(group, _GROUP_RATES[group], self._now_kst())
-        bucket.capacity = rate
-        bucket.refill_per_sec = rate
+        # Once the server's X-RateLimit-* headers have been seen for this group, they are
+        # the source of truth (they already reflect the 09:00-09:10 peak halving), so don't
+        # re-apply the static effective_rate. Until then, use the documented default.
+        if not self._rate_from_header.get(group):
+            rate = effective_rate(group, _GROUP_RATES[group], self._now_kst())
+            bucket.capacity = rate
+            bucket.refill_per_sec = rate
         while not bucket.try_acquire():
             self._sleep(bucket.time_until_available())
+
+    def _sync_bucket_from_headers(self, group: str, headers) -> None:
+        """Reconcile a group's bucket to the server's X-RateLimit-* headers (source of truth).
+        No-op if any header is absent or unparseable."""
+        bucket = self._buckets.get(group)
+        if bucket is None:
+            return
+        limit = headers.get("X-RateLimit-Limit")
+        remaining = headers.get("X-RateLimit-Remaining")
+        reset = headers.get("X-RateLimit-Reset")
+        if limit is None or remaining is None or reset is None:
+            return
+        try:
+            limit_f = float(limit)
+            remaining_f = float(remaining)
+            reset_f = float(reset)
+        except (TypeError, ValueError):
+            return
+        bucket.capacity = limit_f
+        if reset_f > 0:
+            bucket.refill_per_sec = 1.0 / reset_f
+        bucket._tokens = min(bucket._tokens, remaining_f)
+        self._rate_from_header[group] = True
 
     def _request(
         self,
@@ -85,6 +120,7 @@ class TossInvestClient:
         json: dict | None = None,
         data: dict | None = None,
         _retried: bool = False,
+        _attempt: int = 0,
     ) -> Any:
         self._gate(group)
         headers = {"Authorization": f"Bearer {self._token.get_token()}"}
@@ -96,6 +132,7 @@ class TossInvestClient:
         resp = self._http.request(
             method, path, params=params, json=json, data=data, headers=headers
         )
+        self._sync_bucket_from_headers(group, resp.headers)
 
         if resp.status_code == 200:
             try:
@@ -124,7 +161,22 @@ class TossInvestClient:
             self._token.invalidate()
             return self._request(
                 method, path, group=group, account=account,
-                params=params, json=json, data=data, _retried=True,
+                params=params, json=json, data=data, _retried=True, _attempt=_attempt,
+            )
+
+        if resp.status_code == 429 and _attempt < self._max_retries:
+            retry_after = None
+            raw = resp.headers.get("Retry-After")
+            if raw is not None:
+                try:
+                    retry_after = float(raw)
+                except (TypeError, ValueError):
+                    retry_after = None
+            self._sleep(backoff_wait(_attempt, retry_after,
+                                     cap=self._retry_max_wait, rng=self._rng))
+            return self._request(
+                method, path, group=group, account=account,
+                params=params, json=json, data=data, _retried=_retried, _attempt=_attempt + 1,
             )
 
         raise error_from_response(resp.status_code, body, resp.headers)
