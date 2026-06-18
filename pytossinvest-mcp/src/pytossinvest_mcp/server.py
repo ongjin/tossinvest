@@ -10,24 +10,38 @@ from .audit import AuditLog
 from .config import Settings
 from .paper import PaperBroker
 from .safety import SafetyManager
-from .stores import MemoryTokenStore, MemorySpendStore
 from .tools import AppContext
 from . import tools as T
 
 _KST = ZoneInfo("Asia/Seoul")
 
 
+def _redis_from_url(url: str):
+    import redis  # optional dependency — only imported for the redis backend
+    return redis.Redis.from_url(url, decode_responses=True)
+
+
+def _build_stores(settings: Settings):
+    if settings.state_backend == "redis":
+        from .redis_stores import RedisTokenStore, RedisSpendStore
+        from .audit import RedisAuditSink
+        r = _redis_from_url(settings.redis_url)
+        return RedisTokenStore(r), RedisSpendStore(r), RedisAuditSink(r)
+    from .stores import MemoryTokenStore, MemorySpendStore
+    return MemoryTokenStore(), MemorySpendStore(), AuditLog(settings.audit_log_path)
+
+
 def build_app_context(settings: Settings, *, client) -> AppContext:
     paper = PaperBroker(starting_cash=settings.paper_starting_cash)
+    token_store, spend_store, audit = _build_stores(settings)
     safety = SafetyManager(
         settings,
         now=_time.monotonic,
         today=lambda: datetime.now(_KST).date(),
-        token_store=MemoryTokenStore(),
-        spend_store=MemorySpendStore(),
+        token_store=token_store,
+        spend_store=spend_store,
     )
-    audit = AuditLog(settings.audit_log_path)
-    safety.restore_spend(audit.read_events())  # rebuild today's spend across restarts
+    safety.restore_spend(audit.read_events())  # memory: rebuild today; redis: seed is no-op
     return AppContext(
         config=settings, client=client, paper=paper, safety=safety, audit=audit,
         now_kst=lambda: datetime.now(_KST),

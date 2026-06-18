@@ -41,6 +41,22 @@ class GuardrailError(Exception):
         self.message = message
 
 
+def _guard_store(fn):
+    """Wrap a store I/O call: re-raise connection/timeout/OS errors as GuardrailError.
+
+    Does NOT catch GuardrailError — guardrail rejections (invalid/expired tokens, daily
+    limit, etc.) must propagate unchanged.  redis-py's ConnectionError is a subclass of
+    the builtin, so no redis import is needed here.
+    """
+    try:
+        return fn()
+    except (ConnectionError, TimeoutError, OSError) as exc:
+        raise GuardrailError(
+            "state-unavailable",
+            f"order state store is unavailable: {exc}",
+        ) from exc
+
+
 @dataclass
 class OrderSpec:
     symbol: str
@@ -180,24 +196,27 @@ class SafetyManager:
 
     def reserve(self, spec: OrderSpec) -> bool:
         day = self._today().isoformat()
-        return self.spend_store.reserve(
+        return _guard_store(lambda: self.spend_store.reserve(
             day, spec.currency, self._delta(spec), self._daily_cap(spec.currency),
             spec.client_order_id,
-        )
+        ))
 
     def release(self, spec: OrderSpec) -> None:
         day = self._today().isoformat()
-        self.spend_store.release(day, spec.currency, self._delta(spec), spec.client_order_id)
+        _guard_store(lambda: self.spend_store.release(
+            day, spec.currency, self._delta(spec), spec.client_order_id,
+        ))
 
     def issue_token(self, spec: OrderSpec) -> str:
         token = self._gen_id()
         now = self._now()
-        self.token_store.put(token, spec, expires_at=now + self._cfg.confirmation_ttl_sec,
-                             issued_at=now)
+        _guard_store(lambda: self.token_store.put(
+            token, spec, expires_at=now + self._cfg.confirmation_ttl_sec, issued_at=now,
+        ))
         return token
 
     def consume(self, token: str) -> OrderSpec:
-        rec = self.token_store.get(token)
+        rec = _guard_store(lambda: self.token_store.get(token))
         if rec is None:
             raise GuardrailError(
                 "invalid-confirmation",
@@ -205,7 +224,7 @@ class SafetyManager:
             )
         spec, expires_at, issued_at = rec
         if self._now() > expires_at:
-            self.token_store.delete(token)
+            _guard_store(lambda: self.token_store.delete(token))
             raise GuardrailError(
                 "expired-confirmation",
                 "confirmation_token expired; run preview again",
@@ -219,7 +238,7 @@ class SafetyManager:
         return spec
 
     def commit(self, token: str) -> None:
-        self.token_store.delete(token)
+        _guard_store(lambda: self.token_store.delete(token))
 
     def restore_spend(self, events: list[dict]) -> None:
         """Rebuild today's per-currency spend from prior 'placed'/'modified' audit events (UTC ts -> KST date)."""
