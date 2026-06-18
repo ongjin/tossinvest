@@ -54,18 +54,17 @@ deny심볼 → allow심볼 → **하드실링 초과 무조건 거부**(`max-ord
 
 - **FX 환산 없음** — notional 은 주문통화 기준 비교. KRW/USD 버킷 분리(서로 막지 않음).
 - **deny/allow 심볼 매칭은 정규화** — `check_guardrails` 에서 `spec.symbol` 과 리스트 양쪽을 `.strip().upper()` 로 정규화해 비교(대소문자·앞뒤 공백 무시). `spec.symbol` 자체는 변경 안 함 — 브로커에는 원본값이 그대로 전달된다.
-- **modify 델타 회계** — modify(`preview_modify`→`modify_order`)는 `check_daily=True, prev_notional=원본명목`으로 호출 — 일일 버킷은 증분(`new−old`)만 검사·가산. per-order·고액·하드실링은 전액으로 검사. `record_spend(delta)` 가 0-하한(다운사이즈 시 credit, 음수 방지).
+- **modify 델타 회계** — modify(`preview_modify`→`modify_order`)는 `check_daily=True, prev_notional=원본명목`으로 호출 — 일일 버킷은 증분(`new−old`)만 검사·가산. per-order·고액·하드실링은 전액으로 검사. `reserve(signed delta)` → 성공 시 `commit` / 실패 시 `release` 로 0-하한(다운사이즈 시 credit, 음수 방지).
 - 장시간 게이트는 **live 전용** — `tools._market_gate(app, symbol, currency)` 가 `enforce = config.enforce_market_hours and app.is_live`. paper 는 아무때나 데모 가능. **국가 판정은 권위 통화 우선** — `_country_for_order(symbol, currency)`: `currency` 가 `USD`→`US`·`KRW`→`KR`(정규화 후), 없으면 `symbol.isalpha()` 심볼모양 폴백. `preview_order`·`preview_modify` 가 `spec.currency`(C1 권위 통화)를 넘겨 가드레일 통화와 장시간 게이트 국가가 한 소스로 일치(`BRK.B` 처럼 `isalpha()` 가 어긋나는 티커도 API 통화가 있으면 정확).
 
 ## preview → place / preview_modify → modify 토큰 생애 (`safety.py`)
 
 - `build_spec(...)` — 비양수 검증(`invalid-order-value`) → `order_amount` + `price`/`quantity` 동시 전달 거부(`invalid-order-params`) → notional 계산(precedence: `order_amount` → `price*quantity` → `ref_price*quantity` → `GuardrailError("insufficient-order-params")`) + `clientOrderId` 자동 부여(`gen_id`) + `currency` 파라미터 우선, 없으면 `order_currency(symbol)` 폴백 + `modify_order_id` 셋. **`prev_notional` 은 `build_spec` 인자가 아니다** — `preview_modify` 가 `build_spec` 호출 후 `spec.prev_notional`(원본 price×qty)에 직접 대입한다. `tools.py` 의 `preview_order`·`preview_modify` 는 `_price_and_currency(app, symbol)` 로 `get_prices` 한 번 → 권위 통화를 주입; 조회 실패/공백 시 폴백.
-- `issue_token(spec)` — `_pending[token]=_Pending(spec, expires_at=now+ttl, issued_at=now)`. **`preview_order`·`preview_modify` 가 check_guardrails 통과 후에만 호출**.
+- `issue_token(spec)` — token_store 에 `(spec, expires_at=now+ttl, issued_at=now)` 저장(TTL 포함). **`preview_order`·`preview_modify` 가 check_guardrails 통과 후에만 호출**.
 - `consume(token)` — 존재·만료 검증 후 spec 반환. **pop 안 함**(만료면 삭제 후 `expired-confirmation`, 없으면 `invalid-confirmation`). **live 최소지연 게이트**: `config.live_confirm_min_delay_sec > 0` 이고 `config.is_live` 이면 `now - issued_at < delay` 일 때 `confirm-too-soon`.
 - **reserve-first place 흐름**: `place_order` 는 `consume` 후 `check_guardrails(check_daily=False)` → `store.reserve(day, currency, notional, cap, clientOrderId)` → 실행 → 성공 시 `store.commit(token)` / 실패 시 `store.release(day, currency, notional, clientOrderId)`. `reserve` 는 원자적(`clientOrderId` 멱등 — 같은 키로 중복 예약 시 기존 결과 반환). 실패해도 토큰은 살아있어 재시도 가능.
 - **reserve-first modify 흐름**: `modify_order` 는 `consume` 후 `check_guardrails(check_daily=True, prev_notional=spec.prev_notional)` → `store.reserve(day, currency, delta, cap, clientOrderId)` → 실행 → 성공 시 `store.commit(token)` / 실패 시 `store.release(day, currency, delta, clientOrderId)`. delta = new−old(부호있는 델타).
-- `record_spend(notional, currency)` — `_roll_daily()` 후 `_spent[currency] = max(0, spent + notional)`. KRW/USD 버킷 분리. 0-하한(음수 델타 credit 가능하나 0 미만 방지).
-- `restore_spend(events)` — **memory 백엔드 전용**. 부팅 시 audit `read_events()` 결과를 받아 당일(`ts` UTC → KST 날짜 변환) `placed`/`modified` 이벤트의 `notional`·`currency` 를 `_spent` 에 합산 후 통화별 0-하한. dict 가 아닌 이벤트, `notional`/`ts` 누락, 파싱 불가 값은 건너뜀(손상 감사 파일이 있어도 부팅 불가 없음). 감사 파일이 없거나 지워지면 복원 누락(누적 0으로 리셋됨 — 주의). **redis 백엔드에서는 no-op** — counter 가 AOF로 지속.
+- `restore_spend(events)` — **memory 백엔드 전용**. 부팅 시 audit `read_events()` 결과를 받아 당일(`ts` UTC → KST 날짜 변환) `placed`/`modified` 이벤트의 `notional`·`currency` 를 SpendStore 에 `seed` 로 합산(통화별 0-하한). dict 가 아닌 이벤트, `notional`/`ts` 누락, 파싱 불가 값은 건너뜀(손상 감사 파일이 있어도 부팅 불가 없음). 감사 파일이 없거나 지워지면 복원 누락(누적 0으로 리셋됨 — 주의). **redis 백엔드에서는 `seed` 가 no-op** — counter 가 AOF로 지속, 재시드 시 이중 계산 방지.
 - 멱등성: place/modify 실패 시 `release` 호출, 토큰 유지 → 동일 `clientOrderId` 로 멱등 재시도. `commit` 후에는 토큰 pop 되어 2차 발사 불가.
 - **place 시 일일한도 재검사**: `place_order` 는 `consume` 직후 실행 전에 `check_guardrails(spec, ..., check_daily=False)` → `reserve` 가 원자적으로 cap 검사 — preview 를 여러 개 발급해 한도를 초과하는 우회 차단.
 
@@ -99,14 +98,14 @@ deny심볼 → allow심볼 → **하드실링 초과 무조건 거부**(`max-ord
 
 `redis>=5` + `fakeredis[lua]>=2`(dev/test). `TOSSINVEST_REDIS_URL` 필요.
 
-- **SpendStore**: day-scope key(`toss:spend:{currency}:{day}`)에 Decimal 문자열 저장. `reserve`/`release`/`commit` 모두 `Lock`(day-scope) + Python Decimal RMW. **`INCR`/`INCRBYFLOAT` 금지** — 돈은 float 불가, Decimal 직렬화만.
-- **dedup set**: `reserved:{day}:{currency}`에 `clientOrderId` 저장으로 중복 예약 방지(멱등성).
+- **SpendStore**: day-scope key(`spend:{day}:{currency}`)에 Decimal 문자열 저장. `reserve`/`release` 모두 `lock:spend:{day}` Lock(day-scope) + Python Decimal RMW. **`INCR`/`INCRBYFLOAT` 금지** — 돈은 float 불가, Decimal 직렬화만.
+- **dedup set**: `reserved:{day}` Set에 `clientOrderId` 저장으로 중복 예약 방지(멱등성). day-scoped 만으로 충분 — `clientOrderId` 가 전역적으로 고유하므로 통화를 키에 포함할 필요 없음.
 - **`seed` no-op**: redis counter 가 진실의 원천(AOF 지속). 감사 파일을 지워도 redis 카운터는 유지.
 - **Lock.release()**: redis-py 내부적으로 EVALSHA(Lua) 사용 → 테스트에서 `fakeredis[lua]` 서브패키지 필수(없으면 `ResponseError`). 실제 Redis 는 Lua 기본 내장.
 
-### RedisAuditSink (`redis_audit.py`)
+### RedisAuditSink (`audit.py`)
 
-감사 이벤트를 Redis Stream(`toss:audit`)에 기록. JSONL 파일 감사와 병렬 사용 가능. `read_events()` 는 Stream에서 당일분 조회.
+감사 이벤트를 Redis Stream(`audit`)에 기록. JSONL 파일 감사와 병렬 사용 가능. `read_events()` 는 Stream에서 전체 이벤트 조회.
 
 ### fail-closed 래퍼 (`_guard_store`)
 
@@ -121,7 +120,7 @@ store I/O (`reserve`/`release`/`commit`/`seed`) 중 `ConnectionError`/`Timeout`/
 - **읽기(항상)**: `get_accounts`·`get_holdings`·`get_quote`(단일심볼이면 orderbook+trades 동봉)·`get_candles`·`get_stock_info`·`get_market_info`(calendar + 옵션 FX)·`list_orders`·`get_order`
 - **쓰기(read_only 외)**: `get_order_readiness`·`preview_order`→`place_order`·**`preview_modify`**→`modify_order(confirmation_token)`·`cancel_order`
   - `preview_modify(order_id, order_type, price=None, quantity=None, confirm_high_value_order=False)` — live 전용. 원주문 조회 → 병합 → `build_spec(modify_order_id=order_id, prev_notional=원본price×qty, currency=권위통화)` → `check_guardrails(check_daily=True, prev_notional=…)` → `issue_token` → 감사(`modify_previewed`, previousStatus).
-  - `modify_order(confirmation_token)` — live 전용. `consume` → `check_guardrails(check_daily=True, prev_notional=spec.prev_notional)` 재검사 → `client.modify_order` → `finalize(delta)`(성공 시, delta=new−old, 0-하한) / 토큰 유지(실패 시) → 감사(`modified`, notional=delta, currency).
+  - `modify_order(confirmation_token)` — live 전용. `consume` → `check_guardrails(check_daily=True, prev_notional=spec.prev_notional)` 재검사 → `reserve(signed delta)` → `client.modify_order` → 성공 시 `commit(token)`(delta 영구 반영, 0-하한) / 실패 시 `release(delta)`, 토큰 유지 → 감사(`modified`, notional=delta, currency).
   - `cancel_order(order_id)` — live 전용. 취소 전 원주문 `previousStatus` 를 감사(`canceled`)에 기록.
 - 출력 돈/수량은 전부 **문자열**(`_paper_order_dict`·holdings 등에서 `str()`). 툴 description 에 "string money / 2단계 주문 / live-only" 명시(LLM 가이드).
 
@@ -133,7 +132,7 @@ store I/O (`reserve`/`release`/`commit`/`seed`) 중 `ConnectionError`/`Timeout`/
 - **테스트 import** — `from conftest import FakeClient` (pytest 가 `tests/` 를 sys.path 에). `from tests.conftest` 는 `tests` 패키지 없어 깨짐.
 - **call_tool 반환 형식 의존 금지** — MCP 버전마다 다름. 서버 테스트는 `list_tools()`(이름)로 검증, 동작은 `tools.py` 함수 직접 호출로 검증.
 - **통화 판정 — 권위 통화 + 폴백(C1)** — `preview_order`/`preview_modify` 는 `_price_and_currency(app, symbol)` 로 `get_prices([symbol])` 한 번을 호출해 `Price.currency`(권위 통화)를 얻고 `build_spec(currency=…)` 로 주입. 조회 실패·빈 결과·공백 통화면 `order_currency(symbol)` 폴백(`isalpha()`→USD, 아니면 KRW). `BRK.B` 등도 API 통화가 있으면 정확. `order_currency` 자체는 폴백 경로로만 남음. FX 환산 없음. KRW/USD 버킷 분리 유지. **이 권위 통화는 장시간 게이트 국가 판정에도 재사용**(`_market_gate`→`_country_for_order`) — 가드레일 통화와 미장/한국장 판정이 동일 소스. 통화가 없을 때만 `_country_for_order` 가 `isalpha()` 심볼모양으로 폴백.
-- **M1 modify 델타 회계** — `preview_modify`·`modify_order` 는 `check_daily=True, prev_notional=원본명목` 으로 호출 — 일일 버킷은 증분(`new−old`)만 검사·가산, per-order·고액·하드실링은 전액 검사. 성공 시 `finalize(delta)`, `record_spend` 가 0-하한. 다운사이즈(delta<0)는 credit 되어 한도가 느슨해질 수 있음(0-하한으로 음수 방지). 부팅복원도 `placed`+`modified` 델타 합산 후 0-하한.
+- **M1 modify 델타 회계** — `preview_modify`·`modify_order` 는 `check_daily=True, prev_notional=원본명목` 으로 호출 — 일일 버킷은 증분(`new−old`)만 검사·가산, per-order·고액·하드실링은 전액 검사. 성공 시 `commit(token)`, SpendStore 가 0-하한. 다운사이즈(delta<0)는 credit 되어 한도가 느슨해질 수 있음(0-하한으로 음수 방지). 부팅복원도 `placed`+`modified` 델타 합산 후 0-하한.
 - **부팅 복원(UTC ts → KST 날짜)** — `restore_spend` 는 감사 이벤트의 `ts`(UTC ISO) 를 `datetime.fromisoformat(ts).astimezone(_KST).date()` 로 변환해 오늘 KST 날짜와 비교. `placed` 와 `modified` 이벤트의 `notional`·`currency` 를 합산한 뒤 통화별 0-하한 적용. 파싱 실패·dict 가 아닌 이벤트·`notional`/`ts` 필드 누락은 건너뜀(손상 감사 파일 있어도 서버 부팅 불가 없음). 감사 파일을 지우면 당일 누적도 0으로 리셋된다(주의).
 - **`invalid-order-value` (양수 검증)** — `build_spec` 에서 `quantity`·`price`·`order_amount` 가 전달된 경우 `<= 0` 이면 `GuardrailError("invalid-order-value")`. notional 이 음수여서 상한 게이트를 조용히 통과하던 구멍 차단.
 
