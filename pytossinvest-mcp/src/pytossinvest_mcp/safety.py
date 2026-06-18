@@ -11,6 +11,7 @@ from typing import Callable
 from pytossinvest.money import to_decimal
 
 from .config import Settings
+from .stores import TokenStore, SpendStore
 
 _KST = ZoneInfo("Asia/Seoul")
 
@@ -57,13 +58,6 @@ class OrderSpec:
     prev_notional: "Decimal | None" = None
 
 
-@dataclass
-class _Pending:
-    spec: OrderSpec
-    expires_at: float
-    issued_at: float
-
-
 class SafetyManager:
     def __init__(
         self,
@@ -72,14 +66,15 @@ class SafetyManager:
         now: Callable[[], float],
         today: Callable[[], date],
         gen_id: "Callable[[], str] | None" = None,
+        token_store: TokenStore,
+        spend_store: SpendStore,
     ):
         self._cfg = config
         self._now = now          # monotonic seconds (token expiry)
         self._today = today      # date (daily-cap reset)
         self._gen_id = gen_id or (lambda: uuid.uuid4().hex[:32])
-        self._pending: dict[str, _Pending] = {}
-        self._spent_date: "date | None" = None
-        self._spent: dict[str, Decimal] = {"KRW": Decimal("0"), "USD": Decimal("0")}
+        self.token_store = token_store
+        self.spend_store = spend_store
 
     def build_spec(
         self,
@@ -125,6 +120,15 @@ class SafetyManager:
             modify_order_id=modify_order_id,
         )
 
+    def _daily_cap(self, currency: str) -> Decimal:
+        cfg = self._cfg
+        return to_decimal(cfg.daily_order_limit_usd if currency == "USD" else cfg.daily_order_limit)
+
+    def _delta(self, spec: OrderSpec) -> Decimal:
+        if spec.prev_notional is None:
+            return spec.notional
+        return spec.notional - spec.prev_notional
+
     def check_guardrails(
         self, spec: OrderSpec, *, is_market_open: bool, enforce_hours: bool,
         check_daily: bool = True, prev_notional: "Decimal | None" = None,
@@ -161,12 +165,12 @@ class SafetyManager:
                 f"notional {spec.notional} {spec.currency} exceeds per-order cap {per_order_cap}",
             )
         if check_daily:
-            self._roll_daily()
+            day = self._today().isoformat()
             increment = spec.notional if prev_notional is None else spec.notional - prev_notional
-            if self._spent[spec.currency] + increment > daily_cap:
+            if self.spend_store.current(day, spec.currency) + increment > daily_cap:
                 raise GuardrailError(
                     "daily-limit",
-                    f"this order would push today's {spec.currency} total over {daily_cap}",
+                    f"this order would push today's {spec.currency} total over the cap",
                 )
         if enforce_hours and not is_market_open:
             raise GuardrailError(
@@ -174,22 +178,52 @@ class SafetyManager:
                 "market is closed (set enforce_market_hours=false to override)",
             )
 
-    def _roll_daily(self) -> None:
-        d = self._today()
-        if self._spent_date != d:
-            self._spent_date = d
-            self._spent = {"KRW": Decimal("0"), "USD": Decimal("0")}
-
-    def record_spend(self, notional: Decimal, currency: str = "KRW") -> None:
-        self._roll_daily()
-        self._spent[currency] = max(
-            Decimal("0"), self._spent.get(currency, Decimal("0")) + notional
+    def reserve(self, spec: OrderSpec) -> bool:
+        day = self._today().isoformat()
+        return self.spend_store.reserve(
+            day, spec.currency, self._delta(spec), self._daily_cap(spec.currency),
+            spec.client_order_id,
         )
+
+    def release(self, spec: OrderSpec) -> None:
+        day = self._today().isoformat()
+        self.spend_store.release(day, spec.currency, self._delta(spec), spec.client_order_id)
+
+    def issue_token(self, spec: OrderSpec) -> str:
+        token = self._gen_id()
+        now = self._now()
+        self.token_store.put(token, spec, expires_at=now + self._cfg.confirmation_ttl_sec,
+                             issued_at=now)
+        return token
+
+    def consume(self, token: str) -> OrderSpec:
+        rec = self.token_store.get(token)
+        if rec is None:
+            raise GuardrailError(
+                "invalid-confirmation",
+                "unknown or already-used confirmation_token; run preview again",
+            )
+        spec, expires_at, issued_at = rec
+        if self._now() > expires_at:
+            self.token_store.delete(token)
+            raise GuardrailError(
+                "expired-confirmation",
+                "confirmation_token expired; run preview again",
+            )
+        delay = self._cfg.live_confirm_min_delay_sec
+        if self._cfg.is_live and delay > 0 and self._now() - issued_at < delay:
+            raise GuardrailError(
+                "confirm-too-soon",
+                f"live order must wait {delay}s after preview before placing",
+            )
+        return spec
+
+    def commit(self, token: str) -> None:
+        self.token_store.delete(token)
 
     def restore_spend(self, events: list[dict]) -> None:
         """Rebuild today's per-currency spend from prior 'placed'/'modified' audit events (UTC ts -> KST date)."""
-        self._roll_daily()
-        today = self._today()
+        today = self._today().isoformat()
         for ev in events:
             if not isinstance(ev, dict) or ev.get("decision") not in ("placed", "modified"):
                 continue
@@ -198,47 +232,10 @@ class SafetyManager:
             if notional is None or ts is None:
                 continue
             try:
-                ev_date = datetime.fromisoformat(ts).astimezone(_KST).date()
+                ev_date = datetime.fromisoformat(ts).astimezone(_KST).date().isoformat()
                 amount = to_decimal(notional)
             except (ValueError, TypeError, InvalidOperation):
                 continue
             if ev_date != today:
                 continue
-            currency = ev.get("currency", "KRW")
-            self._spent[currency] = self._spent.get(currency, Decimal("0")) + amount
-        for cur in self._spent:
-            self._spent[cur] = max(Decimal("0"), self._spent[cur])
-
-    def issue_token(self, spec: OrderSpec) -> str:
-        token = self._gen_id()
-        now = self._now()
-        self._pending[token] = _Pending(
-            spec=spec, expires_at=now + self._cfg.confirmation_ttl_sec, issued_at=now
-        )
-        return token
-
-    def consume(self, token: str) -> OrderSpec:
-        pending = self._pending.get(token)
-        if pending is None:
-            raise GuardrailError(
-                "invalid-confirmation",
-                "unknown or already-used confirmation_token; run preview again",
-            )
-        if self._now() > pending.expires_at:
-            del self._pending[token]
-            raise GuardrailError(
-                "expired-confirmation",
-                "confirmation_token expired; run preview again",
-            )
-        delay = self._cfg.live_confirm_min_delay_sec
-        if self._cfg.is_live and delay > 0 and self._now() - pending.issued_at < delay:
-            raise GuardrailError(
-                "confirm-too-soon",
-                f"live order must wait {delay}s after preview before placing",
-            )
-        return pending.spec
-
-    def finalize(self, token: str, notional: Decimal) -> None:
-        pending = self._pending.pop(token, None)
-        currency = pending.spec.currency if pending else "KRW"
-        self.record_spend(notional, currency)
+            self.spend_store.seed(today, ev.get("currency", "KRW"), amount)

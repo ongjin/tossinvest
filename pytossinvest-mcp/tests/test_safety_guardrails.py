@@ -5,6 +5,7 @@ import pytest
 
 from pytossinvest_mcp.config import Settings
 from pytossinvest_mcp.safety import SafetyManager, GuardrailError, order_currency
+from pytossinvest_mcp.stores import MemoryTokenStore, MemorySpendStore
 
 
 def _ids():
@@ -17,7 +18,10 @@ def _ids():
 
 def _mgr(**overrides):
     s = Settings(_env_file=None, **overrides)
-    return SafetyManager(s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17), gen_id=_ids())
+    return SafetyManager(
+        s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17), gen_id=_ids(),
+        token_store=MemoryTokenStore(), spend_store=MemorySpendStore(),
+    )
 
 
 def test_build_spec_notional_quantity_based():
@@ -111,11 +115,9 @@ def test_daily_limit_accumulates():
     m = _mgr(max_order_amount="9000000", daily_order_limit="1000000")
     s1 = _spec(m, quantity="10", price="70000")  # 700,000
     m.check_guardrails(s1, is_market_open=True, enforce_hours=False)
-    m.record_spend(s1.notional)
+    assert m.reserve(s1) is True  # simulate successful place
     s2 = _spec(m, quantity="10", price="70000")  # +700,000 -> 1,400,000 > 1,000,000
-    with pytest.raises(GuardrailError) as e:
-        m.check_guardrails(s2, is_market_open=True, enforce_hours=False)
-    assert e.value.code == "daily-limit"
+    assert m.reserve(s2) is False  # daily-limit: reserve rejects, not check_guardrails
 
 
 def test_market_closed_rejected_when_enforced():
@@ -195,22 +197,21 @@ def test_daily_buckets_are_per_currency():
              max_order_amount_usd="9000", daily_order_limit_usd="9000")
     krw = _spec(m, quantity="10", price="70000")  # 700,000 KRW
     m.check_guardrails(krw, is_market_open=True, enforce_hours=False)
-    m.record_spend(krw.notional, krw.currency)
+    assert m.reserve(krw) is True  # simulate successful place
     # a USD order is unaffected by the KRW bucket being near its limit
     usd = _usd_spec(m, quantity="1", price="100")  # $100
     m.check_guardrails(usd, is_market_open=True, enforce_hours=False)  # must NOT raise
     # but a second KRW order tips the KRW bucket over
     krw2 = _spec(m, quantity="10", price="70000")
-    with pytest.raises(GuardrailError) as e:
-        m.check_guardrails(krw2, is_market_open=True, enforce_hours=False)
-    assert e.value.code == "daily-limit"
+    assert m.reserve(krw2) is False  # daily-limit: reserve rejects
 
 
 def test_check_daily_false_skips_daily_gate():
     m = _mgr(max_order_amount="9000000", daily_order_limit="1000000")
-    m.record_spend(Decimal("900000"), "KRW")
+    day = date(2026, 6, 17).isoformat()
+    m.spend_store.seed(day, "KRW", Decimal("900000"))
     spec = _spec(m, quantity="10", price="70000")  # +700,000 -> over 1,000,000
-    # default would raise daily-limit; check_daily=False skips it (other gates still run)
+    # default would reject via reserve; check_daily=False skips it (other gates still run)
     m.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
 
 
@@ -277,7 +278,8 @@ def test_build_spec_currency_none_falls_back_to_symbol_shape():
 
 def test_daily_check_uses_delta_when_prev_notional_given():
     m = _mgr(max_order_amount="9000000", daily_order_limit="1000000")
-    m.record_spend(Decimal("950000"), "KRW")  # bucket near cap
+    day = date(2026, 6, 17).isoformat()
+    m.spend_store.seed(day, "KRW", Decimal("950000"))  # bucket near cap
     # amended order: new=710,000, prev=700,000 -> delta=+10,000 -> 960,000 <= 1,000,000 OK
     spec = _spec(m, quantity="10", price="71000")  # notional 710,000
     m.check_guardrails(spec, is_market_open=True, enforce_hours=False,
@@ -286,7 +288,8 @@ def test_daily_check_uses_delta_when_prev_notional_given():
 
 def test_daily_check_delta_still_rejects_when_over_cap():
     m = _mgr(max_order_amount="9000000", daily_order_limit="1000000")
-    m.record_spend(Decimal("950000"), "KRW")
+    day = date(2026, 6, 17).isoformat()
+    m.spend_store.seed(day, "KRW", Decimal("950000"))
     # new=900,000, prev=100,000 -> delta=+800,000 -> 1,750,000 > 1,000,000 -> reject
     spec = _spec(m, quantity="10", price="90000")  # notional 900,000
     with pytest.raises(GuardrailError) as e:

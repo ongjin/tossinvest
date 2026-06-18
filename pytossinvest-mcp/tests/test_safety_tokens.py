@@ -5,6 +5,7 @@ import pytest
 
 from pytossinvest_mcp.config import Settings
 from pytossinvest_mcp.safety import SafetyManager, GuardrailError
+from pytossinvest_mcp.stores import MemoryTokenStore, MemorySpendStore
 
 
 class Clock:
@@ -20,7 +21,10 @@ class Clock:
 
 def _mgr(clock, **overrides):
     s = Settings(_env_file=None, confirmation_ttl_sec=120, **overrides)
-    return SafetyManager(s, now=clock, today=lambda: date(2026, 6, 17))
+    return SafetyManager(
+        s, now=clock, today=lambda: date(2026, 6, 17),
+        token_store=MemoryTokenStore(), spend_store=MemorySpendStore(),
+    )
 
 
 def _spec(m):
@@ -60,13 +64,16 @@ def test_finalize_consumes_token_and_records_spend():
     spec = _spec(m)
     token = m.issue_token(spec)
     m.consume(token)
-    m.finalize(token, spec.notional)
+    # reserve (before execute) + commit (after success) replaces finalize
+    assert m.reserve(spec) is True
+    m.commit(token)
     # second consume fails: token gone (no double-fire)
     with pytest.raises(GuardrailError) as e:
         m.consume(token)
     assert e.value.code == "invalid-confirmation"
     # spend was recorded toward the daily cap
-    assert m._spent["KRW"] == Decimal("700000")
+    day = date(2026, 6, 17).isoformat()
+    assert m.spend_store.current(day, "KRW") == Decimal("700000")
 
 
 def test_failed_place_leaves_token_for_idempotent_retry():
@@ -74,7 +81,7 @@ def test_failed_place_leaves_token_for_idempotent_retry():
     m = _mgr(clock)
     spec = _spec(m)
     token = m.issue_token(spec)
-    # simulate place attempt that consumes (validates) but does NOT finalize (failed)
+    # simulate place attempt that consumes (validates) but does NOT commit (failed)
     first = m.consume(token)
     # retry: same token still valid, same clientOrderId reused
     second = m.consume(token)
@@ -84,7 +91,10 @@ def test_failed_place_leaves_token_for_idempotent_retry():
 def _live_mgr(clock, **overrides):
     s = Settings(_env_file=None, mode="live", allow_live=True,
                  confirmation_ttl_sec=120, **overrides)
-    return SafetyManager(s, now=clock, today=lambda: date(2026, 6, 17))
+    return SafetyManager(
+        s, now=clock, today=lambda: date(2026, 6, 17),
+        token_store=MemoryTokenStore(), spend_store=MemorySpendStore(),
+    )
 
 
 def test_live_min_delay_blocks_immediate_consume_then_allows():
@@ -108,14 +118,18 @@ def test_min_delay_off_by_default_even_in_live():
 def test_record_spend_floors_at_zero():
     clock = Clock()
     m = _mgr(clock, daily_order_limit="999999999")
-    m.record_spend(Decimal("100000"), "KRW")
-    m.record_spend(Decimal("-300000"), "KRW")  # over-credit (modify downsize)
-    assert m._spent["KRW"] == Decimal("0")  # floored, never negative
+    day = date(2026, 6, 17).isoformat()
+    m.spend_store.seed(day, "KRW", Decimal("100000"))
+    m.spend_store.seed(day, "KRW", Decimal("-300000"))  # over-credit (modify downsize)
+    assert m.spend_store.current(day, "KRW") == Decimal("0")  # floored, never negative
 
 
 def test_restore_spend_sums_todays_placed_by_currency():
     s = Settings(_env_file=None)
-    m = SafetyManager(s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17))
+    m = SafetyManager(
+        s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17),
+        token_store=MemoryTokenStore(), spend_store=MemorySpendStore(),
+    )
     events = [
         {"ts": "2026-06-17T01:00:00+00:00", "decision": "placed", "notional": "700000", "currency": "KRW"},
         {"ts": "2026-06-16T20:00:00+00:00", "decision": "placed", "notional": "300000", "currency": "KRW"},  # UTC yday -> KST 05:00 06-17 = today
@@ -124,13 +138,17 @@ def test_restore_spend_sums_todays_placed_by_currency():
         {"ts": "2026-06-17T03:00:00+00:00", "decision": "previewed", "notional": "50000", "currency": "KRW"},  # not placed -> skip
     ]
     m.restore_spend(events)
-    assert m._spent["KRW"] == Decimal("1000000")  # 700,000 + 300,000
-    assert m._spent["USD"] == Decimal("100")
+    day = date(2026, 6, 17).isoformat()
+    assert m.spend_store.current(day, "KRW") == Decimal("1000000")  # 700,000 + 300,000
+    assert m.spend_store.current(day, "USD") == Decimal("100")
 
 
 def test_restore_spend_skips_malformed_events_without_crashing():
     s = Settings(_env_file=None)
-    m = SafetyManager(s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17))
+    m = SafetyManager(
+        s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17),
+        token_store=MemoryTokenStore(), spend_store=MemorySpendStore(),
+    )
     events = [
         {"ts": "2026-06-17T01:00:00+00:00", "decision": "placed", "notional": "700000", "currency": "KRW"},
         {"ts": "2026-06-17T02:00:00+00:00", "decision": "placed", "notional": "abc", "currency": "KRW"},  # bad value
@@ -138,26 +156,35 @@ def test_restore_spend_skips_malformed_events_without_crashing():
         {"ts": "2026-06-17T03:00:00+00:00", "decision": "placed", "notional": "300000", "currency": "KRW"},
     ]
     m.restore_spend(events)  # must not raise
-    assert m._spent["KRW"] == Decimal("1000000")  # 700,000 + 300,000; bad ones skipped
+    day = date(2026, 6, 17).isoformat()
+    assert m.spend_store.current(day, "KRW") == Decimal("1000000")  # 700,000 + 300,000; bad ones skipped
 
 
 def test_restore_spend_includes_modify_deltas():
     s = Settings(_env_file=None)
-    m = SafetyManager(s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17))
+    m = SafetyManager(
+        s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17),
+        token_store=MemoryTokenStore(), spend_store=MemorySpendStore(),
+    )
     events = [
         {"ts": "2026-06-17T01:00:00+00:00", "decision": "placed", "notional": "700000", "currency": "KRW"},
         {"ts": "2026-06-17T02:00:00+00:00", "decision": "modified", "notional": "10000", "currency": "KRW"},
     ]
     m.restore_spend(events)
-    assert m._spent["KRW"] == Decimal("710000")  # placed + modify delta
+    day = date(2026, 6, 17).isoformat()
+    assert m.spend_store.current(day, "KRW") == Decimal("710000")  # placed + modify delta
 
 
 def test_restore_spend_floors_negative_modify_deltas():
     s = Settings(_env_file=None)
-    m = SafetyManager(s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17))
+    m = SafetyManager(
+        s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17),
+        token_store=MemoryTokenStore(), spend_store=MemorySpendStore(),
+    )
     events = [
         {"ts": "2026-06-17T01:00:00+00:00", "decision": "placed", "notional": "100000", "currency": "KRW"},
         {"ts": "2026-06-17T02:00:00+00:00", "decision": "modified", "notional": "-300000", "currency": "KRW"},
     ]
     m.restore_spend(events)
-    assert m._spent["KRW"] == Decimal("0")  # floored, not negative
+    day = date(2026, 6, 17).isoformat()
+    assert m.spend_store.current(day, "KRW") == Decimal("0")  # floored, not negative
