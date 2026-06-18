@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     http_host: str = "127.0.0.1"
     http_port: int = 8000
     auth_token: str = ""
+    # optional host pinning (defense-in-depth). empty = DNS-rebinding protection off
+    # (bearer is the auth surface). non-empty = only these Host headers accepted.
+    http_allowed_hosts: list[str] = []
 
     @field_validator(
         "max_order_amount", "daily_order_limit", "paper_starting_cash",

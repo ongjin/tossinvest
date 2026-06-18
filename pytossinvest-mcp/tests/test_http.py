@@ -68,3 +68,43 @@ def test_http_accepts_non_localhost_host(tmp_path):
         })
     assert r.status_code != 421          # the bug: localhost-only DNS-rebinding default
     assert r.status_code == 200          # initialize succeeds through the wrapped /mcp app
+
+
+def _build_app_allowed_hosts(tmp_path, allowed):
+    from conftest import FakeClient
+    from pytossinvest_mcp.config import Settings
+    from pytossinvest_mcp.server import build_server
+    from pytossinvest_mcp.http import build_http_app
+
+    settings = Settings(_env_file=None, transport="http", auth_token="secret",
+                        mode="read_only", http_allowed_hosts=allowed,
+                        audit_log_path=str(tmp_path / "audit.log"))
+    mcp = build_server(settings, client=FakeClient())
+    return build_http_app(mcp, auth_token="secret")
+
+
+def _initialize(client, host):
+    init = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "t", "version": "1"}}}
+    return client.post("/mcp", json=init, headers={
+        "Authorization": "Bearer secret",
+        "Accept": "application/json, text/event-stream",
+        "Host": host,
+    })
+
+
+def test_http_allowed_hosts_accepts_listed_host(tmp_path):
+    # opt-in host pinning: when http_allowed_hosts is set, DNS-rebinding protection
+    # is re-enabled and only listed Host headers pass (defense-in-depth on top of bearer).
+    app = _build_app_allowed_hosts(tmp_path, ["mcp.example.com"])
+    with TestClient(app) as client:
+        r = _initialize(client, "mcp.example.com")
+    assert r.status_code == 200
+
+
+def test_http_allowed_hosts_rejects_unlisted_host(tmp_path):
+    app = _build_app_allowed_hosts(tmp_path, ["mcp.example.com"])
+    with TestClient(app) as client:
+        r = _initialize(client, "evil.example.com")
+    assert r.status_code == 421          # not in the allowlist → DNS-rebinding guard 421s

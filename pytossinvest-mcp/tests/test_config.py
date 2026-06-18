@@ -102,3 +102,14 @@ def test_http_with_auth_token_ok():
 def test_stdio_needs_no_auth_token():
     s = Settings(_env_file=None, transport="stdio")  # must not raise
     assert s.transport == "stdio"
+
+
+def test_http_allowed_hosts_defaults_empty():
+    s = Settings(_env_file=None)
+    assert s.http_allowed_hosts == []
+
+
+def test_http_allowed_hosts_can_be_set():
+    s = Settings(_env_file=None, transport="http", auth_token="secret",
+                 http_allowed_hosts=["mcp.example.com", "mcp.example.com:*"])
+    assert s.http_allowed_hosts == ["mcp.example.com", "mcp.example.com:*"]

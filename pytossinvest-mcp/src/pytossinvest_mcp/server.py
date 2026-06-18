@@ -60,8 +60,18 @@ def build_server(settings: Settings, *, client) -> FastMCP:
         # The bearer middleware (http.py) is the entire auth surface; the deploy host is
         # operator/proxy-controlled and unknown at build time, so FastMCP's localhost-only
         # DNS-rebinding default would 421 every real remote client. Auth = bearer, not Host.
+        # Operators who know their host can opt into pinning via http_allowed_hosts
+        # (defense-in-depth: re-enables the Host check against the allowlist).
         from mcp.server.transport_security import TransportSecuritySettings
-        kwargs["transport_security"] = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+        if settings.http_allowed_hosts:
+            kwargs["transport_security"] = TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=settings.http_allowed_hosts,
+            )
+        else:
+            kwargs["transport_security"] = TransportSecuritySettings(
+                enable_dns_rebinding_protection=False
+            )
     mcp = FastMCP("pytossinvest-mcp", **kwargs)
     _register_reads(mcp, app)
     if settings.mode != "read_only":

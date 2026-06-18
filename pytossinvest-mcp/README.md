@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-Apache--2.0-d22128)
-![tests](https://img.shields.io/badge/tests-112%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-166%20passing-2ea44f)
 ![status](https://img.shields.io/badge/Toss%20API-pre--launch-f0ad4e)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -110,6 +110,9 @@ docker compose up --build
 | `AUTH_TOKEN` | — | Bearer 토큰. **http 모드에서 필수** |
 | `STATE_BACKEND` | `memory` | `memory` · `redis` (http 모드에선 `redis` 권장) |
 | `REDIS_URL` | — | `redis://...` (STATE_BACKEND=redis 시 필요) |
+| `HTTP_ALLOWED_HOSTS` | `[]` | JSON 리스트. 선택적 Host 핀닝(심화 방어). 비면 DNS-rebinding 보호 off(인증은 bearer). 예 `["mcp.example.com","mcp.example.com:*"]` |
+
+> **Host 핀닝(`HTTP_ALLOWED_HOSTS`)은 선택입니다.** 기본은 DNS-rebinding 보호를 끄고 **bearer 토큰을 유일한 인증면**으로 둡니다(배포 호스트는 보통 리버스 프록시 뒤라 빌드 시점에 알 수 없음). 운영자가 자기 호스트를 알면 JSON 리스트로 핀닝해 심화 방어를 켤 수 있습니다 — 그 경우 목록에 없는 `Host` 헤더는 `421` 로 거부됩니다(`:*` 로 포트 와일드카드).
 
 ---
 
@@ -223,7 +226,7 @@ place_order(confirmation_token) ────────────┘
 ## 테스트
 
 ```bash
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests   # 112 passing
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests   # 166 passing
 ```
 
 `FakeClient` + paper 엔진으로 검증 — **라이브 키 불필요, 네트워크 0**. 무거운 로직(가드레일·토큰·paper·market_hours·audit)은 pure 모듈로 분리해 직접 단위테스트하고, `server.py` 는 모드별 **툴 등록 여부**만 검증합니다(MCP 트랜스포트 내부에 의존 안 함).

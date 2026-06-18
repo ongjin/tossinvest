@@ -22,6 +22,9 @@ services:
       TOSSINVEST_MODE: ${TOSSINVEST_MODE:-paper}
       TOSSINVEST_CLIENT_ID: ${TOSSINVEST_CLIENT_ID:-}
       TOSSINVEST_CLIENT_SECRET: ${TOSSINVEST_CLIENT_SECRET:-}
+      # OPTIONAL Host pinning (defense-in-depth). Uncomment ONLY together with the
+      # matching .env line — the value must be a non-empty JSON list (empty fails to parse).
+      # TOSSINVEST_HTTP_ALLOWED_HOSTS: ${TOSSINVEST_HTTP_ALLOWED_HOSTS}
     depends_on:
       - redis
     ports:
