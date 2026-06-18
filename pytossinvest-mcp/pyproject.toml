@@ -14,6 +14,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "fakeredis[lua]>=2"]
 redis = ["redis>=5"]
+http = ["uvicorn>=0.30"]
 
 [project.scripts]
 pytossinvest-mcp = "pytossinvest_mcp.server:main"
@@ -32,3 +33,6 @@ pytossinvest = { workspace = true }
 testpaths = ["tests"]
 addopts = "-q"
 markers = ["integration: requires a real Redis (opt-in, skipped by default)"]
+filterwarnings = [
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]

@@ -595,6 +595,9 @@ dev = [
     { name = "fakeredis", extra = ["lua"] },
     { name = "pytest" },
 ]
+http = [
+    { name = "uvicorn" },
+]
 redis = [
     { name = "redis" },
 ]
@@ -607,8 +610,9 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytossinvest", editable = "pytossinvest" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5" },
+    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.30" },
 ]
-provides-extras = ["dev", "redis"]
+provides-extras = ["dev", "redis", "http"]
 
 [[package]]
 name = "pywin32"
