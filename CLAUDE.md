@@ -39,7 +39,7 @@ uv sync --package tossinvest-mcp --extra dev
 
 # 테스트
 uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (59) — respx mock
-uv run --package tossinvest-mcp pytest tossinvest-mcp/tests           # MCP (109) — FakeClient
+uv run --package tossinvest-mcp pytest tossinvest-mcp/tests           # MCP (112) — FakeClient
 
 # MCP 서버 실행 (stdio — Claude Desktop/Cursor 등 MCP 클라이언트용)
 TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
@@ -62,7 +62,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 - **notional 통화** — 가드레일은 주문통화 기준 비교(FX 환산 X). 임계는 통화별 — KRW 1억/30억, USD $10만/$300만.
 - **market_hours US 자정넘김** — 미국장을 KST 로 표기하면 23:30→06:00 처럼 자정을 넘긴다. `start > end` 면 wrap 윈도우(`now >= start or now < end`)로 처리. 깨진 시간 문자열은 "닫힘"으로 안전 처리.
 - **MCP 테스트 import** — 테스트에서 `conftest` 의 `FakeClient` 는 `from conftest import FakeClient`(pytest 가 tests/ 를 sys.path 에 넣음). `from tests.conftest` 는 `tests` 패키지가 없어 깨진다.
-- **통화 판정**(M1·C1 후속 반영): preview(`preview_order`/`preview_modify`)가 `get_prices([symbol])` 한 번으로 **권위 통화**(`Price.currency`)를 얻어 `build_spec(currency=…)` 로 주입; 조회 실패/빈결과/공백통화는 `order_currency(symbol)`(알파벳=USD·숫자=KRW) **폴백**. 즉 `BRK.B` 등도 API 통화가 있으면 정확, 없으면 종전 심볼모양으로 안전 강등. notional 단위는 주문통화, FX 환산 없음. KRW/USD 버킷 분리 유지.
+- **통화 판정**(M1·C1 후속 반영): preview(`preview_order`/`preview_modify`)가 `get_prices([symbol])` 한 번으로 **권위 통화**(`Price.currency`)를 얻어 `build_spec(currency=…)` 로 주입; 조회 실패/빈결과/공백통화는 `order_currency(symbol)`(알파벳=USD·숫자=KRW) **폴백**. 즉 `BRK.B` 등도 API 통화가 있으면 정확, 없으면 종전 심볼모양으로 안전 강등. notional 단위는 주문통화, FX 환산 없음. KRW/USD 버킷 분리 유지. 이 권위 통화는 **장시간 게이트 국가 판정**(`_market_gate`→`_country_for_order`: USD→US·KRW→KR, 없으면 `isalpha()` 폴백)에도 재사용 — 가드레일 통화와 미/한국장 판정이 한 소스(`isalpha()` 휴리스틱은 통화 부재 시 폴백 경로로만 남음).
 - **modify 델타 회계(M1)** — modify 는 일일 버킷에 **부호있는 델타**(`new−old`)를 검사·가산. `preview_modify` 가 원본 주문 명목(`get_order` 의 price×qty)을 `spec.prev_notional` 로 잡고, 일일검사는 증분만(`spent+delta>cap` 이면 `daily-limit`), per-order/고액/하드실링은 여전히 전액. 성공 시 `finalize(델타)`, `record_spend` 가 0-하한. 한계: 일일버킷은 단순합이라 앱에서 직접 낸 주문을 다운사이즈하면 credit 되어 한도가 느슨해질 수 있음(0-하한으로 음수만 방지). 부팅복원은 `placed`+`modified` 델타 합산 후 0-하한.
 - **_spent 부팅 복원** — `place`/`modify` 감사에 `currency`+`notional`(델타) 기록, 서버 시작 시 `audit.read_events()`→`safety.restore_spend` 가 당일(UTC ts→KST 날짜) `placed`+`modified` 합산 후 통화별 0-하한. 감사 파일 지우면 당일 누적도 리셋됨(주의). `restore_spend` 는 dict 가 아닌 이벤트나 `notional` 누락/파싱 불가 이벤트를 조용히 건너뜀(손상 감사 파일이 있어도 부팅 불가 없음).
 - **Round 2 하드닝 추가 사항** — `build_spec` 에서 `order_amount` 를 `price` 또는 `quantity` 와 같이 전달하면 `invalid-order-params` 에러(동시 전달 금지). deny/allow 심볼 매칭은 양쪽을 `.strip().upper()` 정규화하여 대소문자·앞뒤 공백 무시(단, `spec.symbol` 자체는 변경 안 함 — 브로커로 원본 전달). SDK 200 경로가 `(ValueError, RecursionError)` 모두 `invalid-response` 로 처리(깊이 중첩된 JSON 이 부팅 크래시 내지 않음).

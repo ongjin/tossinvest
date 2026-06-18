@@ -7,7 +7,7 @@
 LLM(Claude Desktop/Cursor 등)에 토스 계좌 읽기/거래를 **안전하게** 쥐여주는 MCP 서버. **Apache-2.0**. `pytossinvest` SDK 의존. **stdio** 트랜스포트.
 
 - 위치: `tossinvest-mcp/src/tossinvest_mcp/`
-- 테스트: `uv run --package tossinvest-mcp pytest tossinvest-mcp/tests` (FakeClient + paper 엔진, 109개, **라이브 키 불필요**)
+- 테스트: `uv run --package tossinvest-mcp pytest tossinvest-mcp/tests` (FakeClient + paper 엔진, 112개, **라이브 키 불필요**)
 - 의존: `mcp`(FastMCP), `pydantic-settings`, `pytossinvest`.
 
 ## 🔒 안전 불변식 (이 프로젝트의 핵심 — 절대 깨지 말 것)
@@ -55,7 +55,7 @@ deny심볼 → allow심볼 → **하드실링 초과 무조건 거부**(`max-ord
 - **FX 환산 없음** — notional 은 주문통화 기준 비교. KRW/USD 버킷 분리(서로 막지 않음).
 - **deny/allow 심볼 매칭은 정규화** — `check_guardrails` 에서 `spec.symbol` 과 리스트 양쪽을 `.strip().upper()` 로 정규화해 비교(대소문자·앞뒤 공백 무시). `spec.symbol` 자체는 변경 안 함 — 브로커에는 원본값이 그대로 전달된다.
 - **modify 델타 회계** — modify(`preview_modify`→`modify_order`)는 `check_daily=True, prev_notional=원본명목`으로 호출 — 일일 버킷은 증분(`new−old`)만 검사·가산. per-order·고액·하드실링은 전액으로 검사. `record_spend(delta)` 가 0-하한(다운사이즈 시 credit, 음수 방지).
-- 장시간 게이트는 **live 전용** — `tools._market_gate` 가 `enforce = config.enforce_market_hours and app.is_live`. paper 는 아무때나 데모 가능.
+- 장시간 게이트는 **live 전용** — `tools._market_gate(app, symbol, currency)` 가 `enforce = config.enforce_market_hours and app.is_live`. paper 는 아무때나 데모 가능. **국가 판정은 권위 통화 우선** — `_country_for_order(symbol, currency)`: `currency` 가 `USD`→`US`·`KRW`→`KR`(정규화 후), 없으면 `symbol.isalpha()` 심볼모양 폴백. `preview_order`·`preview_modify` 가 `spec.currency`(C1 권위 통화)를 넘겨 가드레일 통화와 장시간 게이트 국가가 한 소스로 일치(`BRK.B` 처럼 `isalpha()` 가 어긋나는 티커도 API 통화가 있으면 정확).
 
 ## preview → place / preview_modify → modify 토큰 생애 (`safety.py`)
 
@@ -84,7 +84,7 @@ deny심볼 → allow심볼 → **하드실링 초과 무조건 거부**(`max-ord
 - **market_hours US 자정넘김** — 미국장 KST 표기는 23:30→06:00 처럼 wrap. `start>end` 면 `now>=start or now<end`. 깨진 시간 문자열은 "닫힘"(safe).
 - **테스트 import** — `from conftest import FakeClient` (pytest 가 `tests/` 를 sys.path 에). `from tests.conftest` 는 `tests` 패키지 없어 깨짐.
 - **call_tool 반환 형식 의존 금지** — MCP 버전마다 다름. 서버 테스트는 `list_tools()`(이름)로 검증, 동작은 `tools.py` 함수 직접 호출로 검증.
-- **통화 판정 — 권위 통화 + 폴백(C1)** — `preview_order`/`preview_modify` 는 `_price_and_currency(app, symbol)` 로 `get_prices([symbol])` 한 번을 호출해 `Price.currency`(권위 통화)를 얻고 `build_spec(currency=…)` 로 주입. 조회 실패·빈 결과·공백 통화면 `order_currency(symbol)` 폴백(`isalpha()`→USD, 아니면 KRW). `BRK.B` 등도 API 통화가 있으면 정확. `order_currency` 자체는 폴백 경로로만 남음. FX 환산 없음. KRW/USD 버킷 분리 유지.
+- **통화 판정 — 권위 통화 + 폴백(C1)** — `preview_order`/`preview_modify` 는 `_price_and_currency(app, symbol)` 로 `get_prices([symbol])` 한 번을 호출해 `Price.currency`(권위 통화)를 얻고 `build_spec(currency=…)` 로 주입. 조회 실패·빈 결과·공백 통화면 `order_currency(symbol)` 폴백(`isalpha()`→USD, 아니면 KRW). `BRK.B` 등도 API 통화가 있으면 정확. `order_currency` 자체는 폴백 경로로만 남음. FX 환산 없음. KRW/USD 버킷 분리 유지. **이 권위 통화는 장시간 게이트 국가 판정에도 재사용**(`_market_gate`→`_country_for_order`) — 가드레일 통화와 미장/한국장 판정이 동일 소스. 통화가 없을 때만 `_country_for_order` 가 `isalpha()` 심볼모양으로 폴백.
 - **M1 modify 델타 회계** — `preview_modify`·`modify_order` 는 `check_daily=True, prev_notional=원본명목` 으로 호출 — 일일 버킷은 증분(`new−old`)만 검사·가산, per-order·고액·하드실링은 전액 검사. 성공 시 `finalize(delta)`, `record_spend` 가 0-하한. 다운사이즈(delta<0)는 credit 되어 한도가 느슨해질 수 있음(0-하한으로 음수 방지). 부팅복원도 `placed`+`modified` 델타 합산 후 0-하한.
 - **부팅 복원(UTC ts → KST 날짜)** — `restore_spend` 는 감사 이벤트의 `ts`(UTC ISO) 를 `datetime.fromisoformat(ts).astimezone(_KST).date()` 로 변환해 오늘 KST 날짜와 비교. `placed` 와 `modified` 이벤트의 `notional`·`currency` 를 합산한 뒤 통화별 0-하한 적용. 파싱 실패·dict 가 아닌 이벤트·`notional`/`ts` 필드 누락은 건너뜀(손상 감사 파일 있어도 서버 부팅 불가 없음). 감사 파일을 지우면 당일 누적도 0으로 리셋된다(주의).
 - **`invalid-order-value` (양수 검증)** — `build_spec` 에서 `quantity`·`price`·`order_amount` 가 전달된 경우 `<= 0` 이면 `GuardrailError("invalid-order-value")`. notional 이 음수여서 상한 게이트를 조용히 통과하던 구멍 차단.

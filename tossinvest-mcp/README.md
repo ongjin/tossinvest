@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-Apache--2.0-d22128)
-![tests](https://img.shields.io/badge/tests-109%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-112%20passing-2ea44f)
 ![status](https://img.shields.io/badge/Toss%20API-pre--launch-f0ad4e)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -188,7 +188,7 @@ place_order(confirmation_token) ────────────┘
 ## 테스트
 
 ```bash
-uv run --package tossinvest-mcp pytest tossinvest-mcp/tests   # 109 passing
+uv run --package tossinvest-mcp pytest tossinvest-mcp/tests   # 112 passing
 ```
 
 `FakeClient` + paper 엔진으로 검증 — **라이브 키 불필요, 네트워크 0**. 무거운 로직(가드레일·토큰·paper·market_hours·audit)은 pure 모듈로 분리해 직접 단위테스트하고, `server.py` 는 모드별 **툴 등록 여부**만 검증합니다(MCP 트랜스포트 내부에 의존 안 함).

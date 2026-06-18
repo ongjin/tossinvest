@@ -204,3 +204,49 @@ def test_market_preview_uses_single_price_call(app_factory, fake_client):
     pv = T.preview_order(app, symbol="005930", side="BUY", order_type="MARKET", quantity="10")
     n = sum(1 for c in fake_client.calls if c[0] == "get_prices")
     assert n == 1  # currency + ref price share one call
+
+
+def test_country_for_order_prefers_authoritative_currency():
+    # authoritative currency wins over symbol shape
+    assert T._country_for_order("BRK.B", "USD") == "US"   # dotted ticker (isalpha False) but USD
+    assert T._country_for_order("ABCDE", "KRW") == "KR"   # alpha ticker but KRW
+    assert T._country_for_order("AAPL", " usd ") == "US"  # normalized (strip/upper)
+    # fall back to symbol shape when currency missing/blank
+    assert T._country_for_order("AAPL", None) == "US"
+    assert T._country_for_order("005930", None) == "KR"
+    assert T._country_for_order("AAPL", "") == "US"
+
+
+def test_market_gate_uses_authoritative_currency_for_country(app_factory, fake_client):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    kst = ZoneInfo("Asia/Seoul")
+    app = app_factory(mode="live", allow_live=True, enforce_market_hours=True,
+                      now_kst=lambda: datetime(2026, 6, 17, 10, 0, tzinfo=kst))
+    # numeric symbol that the API says is USD-denominated -> US market hours
+    _, enforce = T._market_gate(app, "005930", currency="USD")
+    assert enforce is True
+    country = [c for c in fake_client.calls if c[0] == "get_market_calendar"][-1][1]
+    assert country == "US"  # authoritative USD, not symbol-shape KR
+
+
+def test_preview_order_passes_authoritative_currency_to_gate(app_factory, fake_client):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from pytossinvest.models import Price
+    kst = ZoneInfo("Asia/Seoul")
+    app = app_factory(mode="live", allow_live=True, enforce_market_hours=True,
+                      now_kst=lambda: datetime(2026, 6, 17, 10, 0, tzinfo=kst))
+    fake_client.get_prices = lambda symbols: [
+        Price.model_validate({"symbol": symbols[0], "lastPrice": "100", "currency": "USD"})]
+    # open for both KR and US shapes so the gate never rejects -> test asserts only the country queried
+    open_cal = {"today": {"regularMarket": {"startTime": "00:00", "endTime": "23:59"},
+                          "integrated": {"regularMarket": {"startTime": "00:00", "endTime": "23:59"}}}}
+    def cal(country, date=None):
+        fake_client.calls.append(("get_market_calendar", country))
+        return open_cal
+    fake_client.get_market_calendar = cal
+    T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                    quantity="1", price="100")
+    country = [c for c in fake_client.calls if c[0] == "get_market_calendar"][-1][1]
+    assert country == "US"  # numeric symbol but API currency USD -> US hours

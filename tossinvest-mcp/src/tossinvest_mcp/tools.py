@@ -117,12 +117,23 @@ from pytossinvest.money import to_decimal  # noqa: E402
 from . import market_hours  # noqa: E402
 
 
-def _market_gate(app: AppContext, symbol: str) -> "tuple[bool, bool]":
+def _country_for_order(symbol: str, currency: "str | None") -> str:
+    """Market country for the hours gate. Authoritative currency wins; else symbol shape."""
+    cur = (currency or "").strip().upper()
+    if cur == "USD":
+        return "US"
+    if cur == "KRW":
+        return "KR"
+    return "US" if symbol.isalpha() else "KR"
+
+
+def _market_gate(app: AppContext, symbol: str,
+                 currency: "str | None" = None) -> "tuple[bool, bool]":
     """Return (is_market_open, enforce_hours). Hours are enforced only in live mode."""
     enforce = app.config.enforce_market_hours and app.is_live
     if not enforce:
         return True, False
-    country = "US" if symbol.isalpha() else "KR"
+    country = _country_for_order(symbol, currency)
     cal = app.client.get_market_calendar(country)
     return market_hours.is_market_open(cal, app.now_kst(), country), True
 
@@ -173,7 +184,7 @@ def preview_order(app: AppContext, *, symbol: str, side: str, order_type: str,
         order_amount=order_amount, time_in_force=time_in_force,
         confirm_high_value_order=confirm_high_value_order, ref_price=ref, currency=currency,
     )
-    is_open, enforce = _market_gate(app, symbol)
+    is_open, enforce = _market_gate(app, symbol, spec.currency)
     app.safety.check_guardrails(spec, is_market_open=is_open, enforce_hours=enforce)
     token = app.safety.issue_token(spec)
     app.audit.record({
@@ -265,7 +276,7 @@ def preview_modify(app: AppContext, order_id: str, *, order_type: str,
     orig_qty = original.get("quantity")
     if orig_price is not None and orig_qty is not None:
         spec.prev_notional = to_decimal(orig_price) * to_decimal(orig_qty)
-    is_open, enforce = _market_gate(app, symbol)
+    is_open, enforce = _market_gate(app, symbol, spec.currency)
     app.safety.check_guardrails(spec, is_market_open=is_open, enforce_hours=enforce,
                                 check_daily=True, prev_notional=spec.prev_notional)
     token = app.safety.issue_token(spec)
