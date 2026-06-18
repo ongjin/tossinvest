@@ -55,7 +55,7 @@ def build_app_context(settings: Settings, *, client) -> AppContext:
 
 def build_server(settings: Settings, *, client) -> FastMCP:
     app = build_app_context(settings, client=client)
-    mcp = FastMCP("pytossinvest-mcp")
+    mcp = FastMCP("pytossinvest-mcp", stateless_http=(settings.transport == "http"))
     _register_reads(mcp, app)
     if settings.mode != "read_only":
         _register_writes(mcp, app)
@@ -152,6 +152,15 @@ def _register_writes(mcp: FastMCP, app: AppContext) -> None:
         return T.cancel_order(app, order_id)
 
 
+def run_server(settings: Settings, mcp) -> None:
+    if settings.transport == "http":
+        from .http import build_http_app, serve_http
+        app = build_http_app(mcp, auth_token=settings.auth_token)
+        serve_http(app, host=settings.http_host, port=settings.http_port)
+    else:
+        mcp.run()  # stdio transport (default) for MCP clients like Claude Desktop
+
+
 def main() -> None:
     settings = Settings()
     from pytossinvest import TossInvestClient
@@ -160,4 +169,4 @@ def main() -> None:
         settings.client_id, settings.client_secret, base_url=settings.base_url
     )
     mcp = build_server(settings, client=client)
-    mcp.run()  # stdio transport (default) for MCP clients like Claude Desktop
+    run_server(settings, mcp)
