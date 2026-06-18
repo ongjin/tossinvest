@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from tossinvest_mcp.market_hours import is_market_open
+from pytossinvest_mcp.market_hours import is_market_open
 
 KST = ZoneInfo("Asia/Seoul")
 

@@ -1,4 +1,4 @@
-# tossinvest-mcp
+# pytossinvest-mcp
 
 **LLM(Claude Desktop·Cursor 등)에게 토스증권 계좌를 *안전하게* 쥐여주는 비공식 MCP 서버.** [`pytossinvest`](../pytossinvest/) SDK 위에, **"AI 가 멋대로 내 계좌를 질러버리면?"** 을 클라이언트 신뢰가 아니라 **서버단 가드레일**로 막는 안전모델을 얹었습니다.
 
@@ -45,7 +45,7 @@
 ## 설치 & 실행
 
 ```bash
-uv sync --package tossinvest-mcp --extra dev
+uv sync --package pytossinvest-mcp --extra dev
 ```
 
 **Claude Desktop** (`claude_desktop_config.json`):
@@ -56,7 +56,7 @@ uv sync --package tossinvest-mcp --extra dev
     "tossinvest": {
       "command": "uv",
       "args": ["run", "--directory", "/path/to/toss",
-               "--package", "tossinvest-mcp", "tossinvest-mcp"],
+               "--package", "pytossinvest-mcp", "pytossinvest-mcp"],
       "env": {
         "TOSSINVEST_MODE": "paper",
         "TOSSINVEST_CLIENT_ID": "...",
@@ -71,7 +71,7 @@ uv sync --package tossinvest-mcp --extra dev
 
 ```bash
 TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
-  uv run --package tossinvest-mcp tossinvest-mcp
+  uv run --package pytossinvest-mcp pytossinvest-mcp
 ```
 
 기본 `paper` 라 실주문은 0건 — 안심하고 *"삼성전자 10주 미리보기 해줘"* 부터 시켜보세요. 실거래로 가려면 `TOSSINVEST_MODE=live` **+** `TOSSINVEST_ALLOW_LIVE=1`.
@@ -96,7 +96,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 | `LIVE_CONFIRM_MIN_DELAY_SEC` | `0` | **live 전용** preview→실행 최소 간격(초). `0`=off. 자동승인 클라이언트 방어로 `5` 권장 |
 | `PAPER_STARTING_CASH` | `10000000` | paper 포트폴리오 시작 현금 |
 | `CONFIRMATION_TTL_SEC` | `120` | preview→place 토큰 유효시간(초) |
-| `AUDIT_LOG_PATH` | `tossinvest-mcp-audit.log` | 감사 로그(JSONL) 경로 |
+| `AUDIT_LOG_PATH` | `pytossinvest-mcp-audit.log` | 감사 로그(JSONL) 경로 |
 
 > 돈 관련 필드(`MAX_ORDER_AMOUNT`·`DAILY_ORDER_LIMIT`·`MAX_ORDER_AMOUNT_USD`·`DAILY_ORDER_LIMIT_USD`·`PAPER_STARTING_CASH`)는 float 으로 주면 `TypeError` — 문자열/정수만(JSON/Decimal 안전).
 >
@@ -188,7 +188,7 @@ place_order(confirmation_token) ────────────┘
 ## 테스트
 
 ```bash
-uv run --package tossinvest-mcp pytest tossinvest-mcp/tests   # 112 passing
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests   # 112 passing
 ```
 
 `FakeClient` + paper 엔진으로 검증 — **라이브 키 불필요, 네트워크 0**. 무거운 로직(가드레일·토큰·paper·market_hours·audit)은 pure 모듈로 분리해 직접 단위테스트하고, `server.py` 는 모드별 **툴 등록 여부**만 검증합니다(MCP 트랜스포트 내부에 의존 안 함).

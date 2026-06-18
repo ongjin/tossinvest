@@ -4,11 +4,11 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from pytossinvest.models import Account, BuyingPower, Price
-from tossinvest_mcp.audit import AuditLog
-from tossinvest_mcp.config import Settings
-from tossinvest_mcp.paper import PaperBroker
-from tossinvest_mcp.safety import SafetyManager
-from tossinvest_mcp.tools import AppContext
+from pytossinvest_mcp.audit import AuditLog
+from pytossinvest_mcp.config import Settings
+from pytossinvest_mcp.paper import PaperBroker
+from pytossinvest_mcp.safety import SafetyManager
+from pytossinvest_mcp.tools import AppContext
 
 KST = ZoneInfo("Asia/Seoul")
 

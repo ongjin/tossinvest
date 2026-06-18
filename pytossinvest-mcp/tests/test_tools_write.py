@@ -3,9 +3,9 @@ from decimal import Decimal
 
 import pytest
 
-import tossinvest_mcp.tools as T
-from tossinvest_mcp.safety import GuardrailError
-from tossinvest_mcp.paper import PaperError
+import pytossinvest_mcp.tools as T
+from pytossinvest_mcp.safety import GuardrailError
+from pytossinvest_mcp.paper import PaperError
 
 
 def test_get_order_readiness_paper(app_factory):

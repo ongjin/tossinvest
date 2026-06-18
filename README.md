@@ -24,7 +24,7 @@ decimal·레이트리밋·멱등성까지 제대로 다룬 **SDK** + LLM 에게 
 ## 한 줄로
 
 - **퀀트라면** → `pip install pytossinvest`, 파이썬에서 바로 잔고 조회·주문. *(SDK · MIT)*
-- **AI 에 맡기려면** → MCP 클라이언트(Claude Desktop·Cursor)에 `tossinvest-mcp` 를 꽂으면 *"내 잔고 보여줘 / 삼성전자 5주 사줘 / 환율 추세 분석해줘"* 가 바로 됩니다. *(MCP 서버 · Apache-2.0)*
+- **AI 에 맡기려면** → MCP 클라이언트(Claude Desktop·Cursor)에 `pytossinvest-mcp` 를 꽂으면 *"내 잔고 보여줘 / 삼성전자 5주 사줘 / 환율 추세 분석해줘"* 가 바로 됩니다. *(MCP 서버 · Apache-2.0)*
 
 경계가 **SDK ↔ MCP** 로 깨끗하게 갈립니다. 퀀트는 SDK 만 쓰고, AI 유저는 그 위의 안전모델까지 받습니다.
 
@@ -94,7 +94,7 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
     "tossinvest": {
       "command": "uv",
       "args": ["run", "--directory", "/path/to/tossinvest",
-               "--package", "tossinvest-mcp", "tossinvest-mcp"],
+               "--package", "pytossinvest-mcp", "pytossinvest-mcp"],
       "env": {
         "TOSSINVEST_MODE": "paper",
         "TOSSINVEST_CLIENT_ID": "...",
@@ -107,7 +107,7 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 
 기본 `paper` 라 실주문은 0건 — 안심하고 *"삼성전자 10주 미리보기 해줘"* 부터 시켜보세요. 실거래로 가려면 `TOSSINVEST_MODE=live` + `TOSSINVEST_ALLOW_LIVE=1`.
 
-> ⚠️ **live 는 *자동승인* MCP 클라이언트와 같이 쓰지 마세요.** preview→place 2단계는 *사람이 각 호출을 승인*한다는 전제입니다. 클라이언트가 툴 호출을 자동 승인하면 LLM 이 한 턴에 preview→place 를 연달아 쏴 사람이 못 낍니다. 추가 방어로 `tossinvest-mcp` 의 `LIVE_CONFIRM_MIN_DELAY_SEC` 를 쓸 수 있습니다.
+> ⚠️ **live 는 *자동승인* MCP 클라이언트와 같이 쓰지 마세요.** preview→place 2단계는 *사람이 각 호출을 승인*한다는 전제입니다. 클라이언트가 툴 호출을 자동 승인하면 LLM 이 한 턴에 preview→place 를 연달아 쏴 사람이 못 낍니다. 추가 방어로 `pytossinvest-mcp` 의 `LIVE_CONFIRM_MIN_DELAY_SEC` 를 쓸 수 있습니다.
 
 ---
 
@@ -124,7 +124,7 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 - **읽기 (항상):** `get_accounts` · `get_holdings` · `get_quote` · `get_candles` · `get_stock_info` · `get_market_info` · `list_orders` · `get_order`
 - **쓰기 (paper·live):** `get_order_readiness` · **`preview_order` → `place_order`** · **`preview_modify` → `modify_order`** · `cancel_order`
 
-가드레일 한도·종목 allow/deny·시작 현금 등은 전부 env 로 조절합니다 → [`tossinvest-mcp/README.md`](tossinvest-mcp/README.md).
+가드레일 한도·종목 allow/deny·시작 현금 등은 전부 env 로 조절합니다 → [`pytossinvest-mcp/README.md`](pytossinvest-mcp/README.md).
 
 ---
 
@@ -133,17 +133,17 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 | 패키지 | 역할 | 라이선스 | 의존 |
 |---|---|:---:|---|
 | [`pytossinvest`](pytossinvest/) | 토스 Open API Python SDK | **MIT** | — |
-| [`tossinvest-mcp`](tossinvest-mcp/) | 안전모델을 얹은 MCP 서버 | **Apache-2.0** | `pytossinvest` |
+| [`pytossinvest-mcp`](pytossinvest-mcp/) | 안전모델을 얹은 MCP 서버 | **Apache-2.0** | `pytossinvest` |
 
 `uv` 워크스페이스 모노레포라, 둘은 한 레포에서 따로 빌드·배포됩니다.
 
 ```bash
 # 테스트 — 라이브 키 불필요
 uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 46 passing
-uv run --package tossinvest-mcp pytest tossinvest-mcp/tests           # 98 passing
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # 98 passing
 ```
 
-더 깊은 문서는 [`docs/claude/`](docs/claude/) — [API 레퍼런스](docs/claude/tossinvest-open-api.md) · [SDK 내부구조](docs/claude/pytossinvest-sdk.md) · [MCP 안전모델](docs/claude/tossinvest-mcp.md).
+더 깊은 문서는 [`docs/claude/`](docs/claude/) — [API 레퍼런스](docs/claude/tossinvest-open-api.md) · [SDK 내부구조](docs/claude/pytossinvest-sdk.md) · [MCP 안전모델](docs/claude/pytossinvest-mcp.md).
 
 ---
 
@@ -155,4 +155,4 @@ uv run --package tossinvest-mcp pytest tossinvest-mcp/tests           # 98 passi
 
 ## 라이선스
 
-SDK(`pytossinvest`) = **MIT** · MCP 서버(`tossinvest-mcp`) = **Apache-2.0**. 각 패키지 디렉터리의 `LICENSE` 참고.
+SDK(`pytossinvest`) = **MIT** · MCP 서버(`pytossinvest-mcp`) = **Apache-2.0**. 각 패키지 디렉터리의 `LICENSE` 참고.

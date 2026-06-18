@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from tossinvest_mcp.audit import AuditLog
+from pytossinvest_mcp.audit import AuditLog
 
 
 def _fixed_clock():

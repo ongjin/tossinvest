@@ -1,2 +1,2 @@
 [tool.uv.workspace]
-members = ["pytossinvest", "tossinvest-mcp"]
+members = ["pytossinvest", "pytossinvest-mcp"]

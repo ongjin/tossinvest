@@ -1,8 +1,8 @@
 import asyncio
 from decimal import Decimal
 
-from tossinvest_mcp.config import Settings
-from tossinvest_mcp.server import build_server, build_app_context
+from pytossinvest_mcp.config import Settings
+from pytossinvest_mcp.server import build_server, build_app_context
 from conftest import FakeClient  # reuse the fake (pytest puts tests/ on sys.path)
 
 READ_TOOLS = {"get_accounts", "get_holdings", "get_quote", "get_candles",

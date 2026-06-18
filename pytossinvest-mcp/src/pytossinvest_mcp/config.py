@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     live_confirm_min_delay_sec: int = 0
 
     # audit
-    audit_log_path: str = "tossinvest-mcp-audit.log"
+    audit_log_path: str = "pytossinvest-mcp-audit.log"
 
     @field_validator(
         "max_order_amount", "daily_order_limit", "paper_starting_cash",

@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from tossinvest_mcp.config import Settings
+from pytossinvest_mcp.config import Settings
 
 
 def _settings(**kw):

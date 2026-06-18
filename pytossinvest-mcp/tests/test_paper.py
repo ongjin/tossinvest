@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from tossinvest_mcp.paper import PaperBroker, PaperError
+from pytossinvest_mcp.paper import PaperBroker, PaperError
 
 
 def test_starts_with_configured_cash():

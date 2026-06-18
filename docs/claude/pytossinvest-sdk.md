@@ -4,7 +4,7 @@
 
 # pytossinvest (SDK) 내부구조
 
-토스증권 Open API 의 Python 클라이언트. **MIT**. `tossinvest-mcp` 가 이걸 의존하므로 **공개 API 를 깨면 MCP 가 깨진다** — 시그니처/반환타입 변경 시 MCP 테스트도 그린 확인.
+토스증권 Open API 의 Python 클라이언트. **MIT**. `pytossinvest-mcp` 가 이걸 의존하므로 **공개 API 를 깨면 MCP 가 깨진다** — 시그니처/반환타입 변경 시 MCP 테스트도 그린 확인.
 
 - 위치: `pytossinvest/src/pytossinvest/`
 - 테스트: `uv run --package pytossinvest --extra dev pytest pytossinvest/tests` (respx httpx mock, 59개, **라이브 키 불필요**)

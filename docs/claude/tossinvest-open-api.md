@@ -1,4 +1,4 @@
-> **언제 읽나**: 이 레포(`pytossinvest` SDK + `tossinvest-mcp` MCP 서버)가 다루는 **토스증권 Open API 의 코어 레퍼런스**. 인증 2단 구조·엔드포인트·요청/응답 스키마·rate limit·에러코드·도메인 함정의 단일 소스. **SDK 엔드포인트 추가·MCP 툴 작업·주문 로직 손대기 전 여기부터 읽는다.** (원래 블로그(zerry.co.kr) `docs/claude/` 에 있다가 이 레포로 이전됨 — 블로그 글감: `tossinvest-open-api-guide`.)
+> **언제 읽나**: 이 레포(`pytossinvest` SDK + `pytossinvest-mcp` MCP 서버)가 다루는 **토스증권 Open API 의 코어 레퍼런스**. 인증 2단 구조·엔드포인트·요청/응답 스키마·rate limit·에러코드·도메인 함정의 단일 소스. **SDK 엔드포인트 추가·MCP 툴 작업·주문 로직 손대기 전 여기부터 읽는다.** (원래 블로그(zerry.co.kr) `docs/claude/` 에 있다가 이 레포로 이전됨 — 블로그 글감: `tossinvest-open-api-guide`.)
 >
 > **🔄 자가갱신**: 이 문서는 **스냅샷**이다. canonical `openapi.json` 과 어긋나거나, 코드 작업 중 새 필드·엔드포인트·enum·함정을 발견하면 **그 세션에서 바로 이 문서를 갱신**한다(커밋은 수동). 권위 순서는 ① openapi.json → ② developers.tossinvest.com/docs → ③ 본 문서.
 
@@ -251,4 +251,4 @@ curl 'https://openapi.tossinvest.com/api/v1/holdings' \
 
 ---
 
-> 📌 **이 레포에서의 구현 현황**: SDK(`pytossinvest`)는 §1~§5 의 인증·레이트리밋·decimal·에러·엔드포인트를 구현 완료(MIT). MCP 서버(`tossinvest-mcp`)는 그 위에 안전모델(모드·가드레일·preview→confirm·멱등성)을 얹음(Apache-2.0). 설계·구현 상세는 `docs/superpowers/` 의 spec/plan, 운영 컨벤션은 루트 `CLAUDE.md` 참고.
+> 📌 **이 레포에서의 구현 현황**: SDK(`pytossinvest`)는 §1~§5 의 인증·레이트리밋·decimal·에러·엔드포인트를 구현 완료(MIT). MCP 서버(`pytossinvest-mcp`)는 그 위에 안전모델(모드·가드레일·preview→confirm·멱등성)을 얹음(Apache-2.0). 설계·구현 상세는 `docs/superpowers/` 의 spec/plan, 운영 컨벤션은 루트 `CLAUDE.md` 참고.

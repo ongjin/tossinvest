@@ -1,10 +1,10 @@
 import asyncio
 
-import tossinvest_mcp
+import pytossinvest_mcp
 
 
 def test_version_exposed():
-    assert tossinvest_mcp.__version__ == "0.0.1"
+    assert pytossinvest_mcp.__version__ == "0.0.1"
 
 
 def test_fastmcp_harness_works():

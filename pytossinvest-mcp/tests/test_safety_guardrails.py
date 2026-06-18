@@ -3,8 +3,8 @@ from decimal import Decimal
 
 import pytest
 
-from tossinvest_mcp.config import Settings
-from tossinvest_mcp.safety import SafetyManager, GuardrailError, order_currency
+from pytossinvest_mcp.config import Settings
+from pytossinvest_mcp.safety import SafetyManager, GuardrailError, order_currency
 
 
 def _ids():

@@ -1,4 +1,4 @@
-import tossinvest_mcp.tools as T
+import pytossinvest_mcp.tools as T
 
 
 def test_get_quote_single_symbol_includes_depth(app_factory, fake_client):

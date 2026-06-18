@@ -1,13 +1,13 @@
-> **언제 읽나**: `tossinvest-mcp`(MCP 서버) 코드를 만질 때 — 툴 추가/수정, 안전모델(모드·가드레일·preview/confirm·멱등성) 손보기, paper 엔진·감사로그 작업. 안전 불변식과 모듈별 책임의 living 레퍼런스. (외부 API 는 [tossinvest-open-api.md](tossinvest-open-api.md), SDK 는 [pytossinvest-sdk.md](pytossinvest-sdk.md), 설계 시점 기록은 `docs/superpowers/`.)
+> **언제 읽나**: `pytossinvest-mcp`(MCP 서버) 코드를 만질 때 — 툴 추가/수정, 안전모델(모드·가드레일·preview/confirm·멱등성) 손보기, paper 엔진·감사로그 작업. 안전 불변식과 모듈별 책임의 living 레퍼런스. (외부 API 는 [tossinvest-open-api.md](tossinvest-open-api.md), SDK 는 [pytossinvest-sdk.md](pytossinvest-sdk.md), 설계 시점 기록은 `docs/superpowers/`.)
 >
 > **🔄 자가갱신**: MCP 코드를 바꾸면(새 툴·모드·가드레일·config·라우팅·함정) **같은 세션에 이 문서를 갱신**한다. 커밋은 수동. 코드가 진실 — 어긋나면 발견 즉시 고친다.
 
-# tossinvest-mcp (MCP 서버) 내부구조
+# pytossinvest-mcp (MCP 서버) 내부구조
 
 LLM(Claude Desktop/Cursor 등)에 토스 계좌 읽기/거래를 **안전하게** 쥐여주는 MCP 서버. **Apache-2.0**. `pytossinvest` SDK 의존. **stdio** 트랜스포트.
 
-- 위치: `tossinvest-mcp/src/tossinvest_mcp/`
-- 테스트: `uv run --package tossinvest-mcp pytest tossinvest-mcp/tests` (FakeClient + paper 엔진, 112개, **라이브 키 불필요**)
+- 위치: `pytossinvest-mcp/src/pytossinvest_mcp/`
+- 테스트: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests` (FakeClient + paper 엔진, 112개, **라이브 키 불필요**)
 - 의존: `mcp`(FastMCP), `pydantic-settings`, `pytossinvest`.
 
 ## 🔒 안전 불변식 (이 프로젝트의 핵심 — 절대 깨지 말 것)
@@ -99,4 +99,4 @@ deny심볼 → allow심볼 → **하드실링 초과 무조건 거부**(`max-ord
 
 ## config (env `TOSSINVEST_`)
 
-`mode`·`allow_live`·`client_id`·`client_secret`·`base_url`·`max_order_amount`(1,000,000 KRW)·`daily_order_limit`(5,000,000 KRW)·`max_order_amount_usd`(1,000 USD)·`daily_order_limit_usd`(5,000 USD)·`allow_symbols`/`deny_symbols`(JSON 리스트)·`enforce_market_hours`(True)·`paper_starting_cash`(10,000,000)·`confirmation_ttl_sec`(120)·`live_confirm_min_delay_sec`(0, off — live 환경 권장 5)·`audit_log_path`. 돈 필드(`max_order_amount`·`daily_order_limit`·`max_order_amount_usd`·`daily_order_limit_usd`·`paper_starting_cash`)는 `_no_float` validator 로 float 거부. 사용자용 표는 `tossinvest-mcp/README.md`.
+`mode`·`allow_live`·`client_id`·`client_secret`·`base_url`·`max_order_amount`(1,000,000 KRW)·`daily_order_limit`(5,000,000 KRW)·`max_order_amount_usd`(1,000 USD)·`daily_order_limit_usd`(5,000 USD)·`allow_symbols`/`deny_symbols`(JSON 리스트)·`enforce_market_hours`(True)·`paper_starting_cash`(10,000,000)·`confirmation_ttl_sec`(120)·`live_confirm_min_delay_sec`(0, off — live 환경 권장 5)·`audit_log_path`. 돈 필드(`max_order_amount`·`daily_order_limit`·`max_order_amount_usd`·`daily_order_limit_usd`·`paper_starting_cash`)는 `_no_float` validator 로 float 거부. 사용자용 표는 `pytossinvest-mcp/README.md`.

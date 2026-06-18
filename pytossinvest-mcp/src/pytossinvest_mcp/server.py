@@ -33,7 +33,7 @@ def build_app_context(settings: Settings, *, client) -> AppContext:
 
 def build_server(settings: Settings, *, client) -> FastMCP:
     app = build_app_context(settings, client=client)
-    mcp = FastMCP("tossinvest-mcp")
+    mcp = FastMCP("pytossinvest-mcp")
     _register_reads(mcp, app)
     if settings.mode != "read_only":
         _register_writes(mcp, app)

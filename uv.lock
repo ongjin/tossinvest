@@ -11,7 +11,7 @@ resolution-markers = [
 [manifest]
 members = [
     "pytossinvest",
-    "tossinvest-mcp",
+    "pytossinvest-mcp",
 ]
 
 [[package]]
@@ -511,6 +511,30 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
+name = "pytossinvest-mcp"
+version = "0.0.1"
+source = { editable = "pytossinvest-mcp" }
+dependencies = [
+    { name = "mcp" },
+    { name = "pydantic-settings" },
+    { name = "pytossinvest" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "mcp", specifier = ">=1.12" },
+    { name = "pydantic-settings", specifier = ">=2" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "pytossinvest", editable = "pytossinvest" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "pywin32"
 version = "312"
 source = { registry = "https://pypi.org/simple" }
@@ -690,30 +714,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/eb/e3/7c1dc7381d9f8ab7d
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/bb/2799cc2ede3ed41131f8975621e7213dfc7ef4acbbaadfa440f32500c370/starlette-1.3.1-py3-none-any.whl", hash = "sha256:c7372aae11c3c3f26a42df7bd626cec2f47d03483d261d369516a615a53714c6", size = 73632, upload-time = "2026-06-12T09:23:10.017Z" },
 ]
-
-[[package]]
-name = "tossinvest-mcp"
-version = "0.0.1"
-source = { editable = "tossinvest-mcp" }
-dependencies = [
-    { name = "mcp" },
-    { name = "pydantic-settings" },
-    { name = "pytossinvest" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "mcp", specifier = ">=1.12" },
-    { name = "pydantic-settings", specifier = ">=2" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "pytossinvest", editable = "pytossinvest" },
-]
-provides-extras = ["dev"]
 
 [[package]]
 name = "typing-extensions"

@@ -10,7 +10,7 @@
 
 > ⚠️ **비공식 클라이언트** — 토스증권과 무관하며 상표/엔도르스먼트와도 무관합니다. 토스 Open API 는 2026-06 기준 **사전신청 단계**라, 이 SDK 는 라이브 API 가 아니라 **응답 fixture(`respx` mock)** 에 대해 개발·테스트됩니다. 정식 오픈 시 일부 동작이 바뀔 수 있습니다.
 
-> 🤖 AI 에게 계좌를 *안전하게* 쥐여주는 MCP 서버를 찾는다면 → [`tossinvest-mcp`](../tossinvest-mcp/) (이 SDK 위에 안전모델을 얹은 패키지).
+> 🤖 AI 에게 계좌를 *안전하게* 쥐여주는 MCP 서버를 찾는다면 → [`pytossinvest-mcp`](../pytossinvest-mcp/) (이 SDK 위에 안전모델을 얹은 패키지).
 
 ---
 
@@ -231,7 +231,7 @@ except BusinessRuleError as e:
 
 - **`X-RateLimit-*` 헤더 동적 동기화** — 서버 응답마다 해당 그룹 버킷을 `Limit`(capacity)·`Reset`(1/refill_per_sec)·`Remaining`(잔여 토큰 상한)으로 업데이트합니다. 헤더가 없으면 no-op. 헤더를 한 번 받은 그룹은 이후 피크반토막 미적용(헤더가 진실).
 - **429 bounded 자동 retry** — `Retry-After` 헤더가 있으면 그 값만큼, 없으면 지수백오프+full jitter(`retry_max_wait` 상한) 만큼 대기 후 자동 재시도. 기본 `max_retries=3`. `max_retries=0` 이면 즉시 `RateLimitError`.
-- **5xx·타임아웃은 재시도 안 함** — 재시도 오케스트레이션은 호출자(또는 [`tossinvest-mcp`](../tossinvest-mcp/) 레이어) 책임.
+- **5xx·타임아웃은 재시도 안 함** — 재시도 오케스트레이션은 호출자(또는 [`pytossinvest-mcp`](../pytossinvest-mcp/) 레이어) 책임.
 - **`clientOrderId` 자동 생성 안 함** — 멱등성을 원하면 직접 부여하세요. 429 재시도 시 `clientOrderId` 는 변경되지 않아 멱등성이 유지됩니다.
 
 ---
@@ -248,4 +248,4 @@ uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 59 passi
 
 ## 라이선스
 
-**MIT** — 패키지 디렉터리의 [`LICENSE`](LICENSE) 참고. (상위 MCP 서버 [`tossinvest-mcp`](../tossinvest-mcp/) 는 Apache-2.0.)
+**MIT** — 패키지 디렉터리의 [`LICENSE`](LICENSE) 참고. (상위 MCP 서버 [`pytossinvest-mcp`](../pytossinvest-mcp/) 는 Apache-2.0.)
