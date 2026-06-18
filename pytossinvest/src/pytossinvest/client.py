@@ -16,9 +16,10 @@ __all__ = ["TossInvestClient"]
 
 _KST = ZoneInfo("Asia/Seoul")
 
-# Base TPS per group. v0.0.1 uses these static documented defaults plus peak-hour
-# halving (applied in _gate). Dynamic X-RateLimit-* header sync is not yet implemented
-# (tracked for v0.0.2); the bucket paces requests and 429s surface as RateLimitError.
+# Seed TPS per group: static documented defaults used until the server's
+# X-RateLimit-* headers are seen, which then reconcile the bucket (header is the
+# source of truth) and suppress peak-halving for that group. 429s are auto-retried
+# (bounded); RateLimitError surfaces only once retries are exhausted.
 _GROUP_RATES: dict[str, float] = {
     "AUTH": 5,
     "ACCOUNT": 1,
