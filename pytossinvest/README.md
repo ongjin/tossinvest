@@ -5,10 +5,10 @@
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-MIT-3da639)
 ![tests](https://img.shields.io/badge/tests-59%20passing-2ea44f)
-![status](https://img.shields.io/badge/Toss%20API-pre--launch-f0ad4e)
+![status](https://img.shields.io/badge/Toss%20API-available-2ea44f)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
-> ⚠️ **비공식 클라이언트** — 토스증권과 무관하며 상표/엔도르스먼트와도 무관합니다. 토스 Open API 는 2026-06 기준 **사전신청 단계**라, 이 SDK 는 라이브 API 가 아니라 **응답 fixture(`respx` mock)** 에 대해 개발·테스트됩니다. 정식 오픈 시 일부 동작이 바뀔 수 있습니다.
+> ⚠️ **비공식 클라이언트** — 토스증권과 무관하며 상표/엔도르스먼트와도 무관합니다. 토스 Open API 는 WTS `설정 > Open API` 에서 키 발급이 가능하지만, 이 SDK 는 라이브 API 가 아니라 **응답 fixture(`respx` mock)** 에 대해 개발·테스트됩니다. 한도·정책 변동 시 일부 동작이 바뀔 수 있습니다.
 
 > 🤖 AI 에게 계좌를 *안전하게* 쥐여주는 MCP 서버를 찾는다면 → [`pytossinvest-mcp`](../pytossinvest-mcp/) (이 SDK 위에 안전모델을 얹은 패키지).
 

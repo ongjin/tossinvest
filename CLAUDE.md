@@ -8,7 +8,7 @@
 
 # 토스증권 Open API 오픈소스 (pytossinvest + pytossinvest-mcp)
 
-토스증권 Open API 를 AI/퀀트에 연결하는 **오픈소스**. 1순위 목표는 **평판/포트폴리오**(수익은 스폰서·콘텐츠 부차). 차별점 = "어떻게 LLM 에게 진짜 증권계좌 키를 **안전하게** 쥐여주나"(안전모델). API 는 2026-06 기준 **사전신청 단계**라 라이브 키 없이 전부 만들고·테스트·데모 가능하게 설계됨(paper 모드 + mock fixture).
+토스증권 Open API 를 AI/퀀트에 연결하는 **오픈소스**. 1순위 목표는 **평판/포트폴리오**(수익은 스폰서·콘텐츠 부차). 차별점 = "어떻게 LLM 에게 진짜 증권계좌 키를 **안전하게** 쥐여주나"(안전모델). API 는 WTS `설정 > Open API` 에서 키 발급 가능(한도·정책 변동 가능)이지만, 라이브 키 없이 전부 만들고·테스트·데모 가능하게 설계됨(paper 모드 + mock fixture).
 
 ## Tech Stack
 
@@ -56,7 +56,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 
 ## 주의할 함정 (이미 겪었거나 설계로 막은 것)
 
-- **토스 API 사전신청 단계** — 한도·정책·엔드포인트·필드가 정식 오픈 전까지 바뀔 수 있다. `docs/claude/tossinvest-open-api.md` 는 **스냅샷**이니 막히면 canonical `openapi.json` 재확인(자가갱신).
+- **토스 API 정책 변동 가능** — 한도·정책·엔드포인트·필드가 사전 공지 없이 바뀔 수 있다. `docs/claude/tossinvest-open-api.md` 는 **스냅샷**이니 막히면 canonical `openapi.json` 재확인(자가갱신).
 - **paper modify/cancel 은 live 전용** — paper 는 즉시체결 모델이라 정정/취소할 미체결 주문이 없음(`PaperError` 로 명확히 거부, 실제 `409 already-filled` 미러링).
 - **paper MARKET 체결가** — 체결 시점에 시세가 비면 가격 0 으로 조용히 체결되던 버그를 막음 → ref price 없으면 `PaperError`(토큰 살려둠, 재시도 가능).
 - **notional 통화** — 가드레일은 주문통화 기준 비교(FX 환산 X). 임계는 통화별 — KRW 1억/30억, USD $10만/$300만.

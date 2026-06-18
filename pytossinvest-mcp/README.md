@@ -5,12 +5,12 @@
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-Apache--2.0-d22128)
 ![tests](https://img.shields.io/badge/tests-166%20passing-2ea44f)
-![status](https://img.shields.io/badge/Toss%20API-pre--launch-f0ad4e)
+![status](https://img.shields.io/badge/Toss%20API-available-2ea44f)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
 > ⚠️ **비공식 MCP 서버** — 토스증권과 무관하며 상표/엔도르스먼트와도 무관합니다. **transport 는 기본 stdio**(Claude Desktop·Cursor 등 로컬 MCP 클라이언트용) — 원격 **http** 도 선택 가능(아래 [HTTP 원격 모드](#http-원격-모드-docker--redis)).
 >
-> 토스 Open API 는 2026-06 기준 **사전신청 단계**. **기본 모드 `paper`** 는 주문을 로컬 시뮬로 체결(실주문 0)하되 **시세는 실제로 읽으므로 API 키가 필요**합니다. 테스트 스위트는 완전 오프라인.
+> 토스 Open API 는 WTS `설정 > Open API` 에서 키 발급 가능(한도·정책 변동 가능). **기본 모드 `paper`** 는 주문을 로컬 시뮬로 체결(실주문 0)하되 **시세는 실제로 읽으므로 API 키가 필요**합니다. 테스트 스위트는 완전 오프라인.
 
 ---
 

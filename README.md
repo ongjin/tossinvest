@@ -10,14 +10,14 @@ decimal·레이트리밋·멱등성까지 제대로 다룬 **SDK** + LLM 에게 
 ![SDK](https://img.shields.io/badge/SDK-MIT-3da639)
 ![MCP](https://img.shields.io/badge/MCP%20server-Apache--2.0-d22128)
 ![tests](https://img.shields.io/badge/tests-144%20passing-2ea44f)
-![status](https://img.shields.io/badge/Toss%20API-pre--launch-f0ad4e)
+![status](https://img.shields.io/badge/Toss%20API-available-2ea44f)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
 </div>
 
 ![아키텍처 — 한 레포, 두 패키지](docs/images/architecture.png)
 
-> ⚠️ **비공식(unofficial) 클라이언트** — 토스증권과 무관하고, 상표/엔도르스먼트와도 무관합니다. 토스 Open API 는 2026-06 기준 **사전신청 단계**라, 라이브 키 없이도 전부 만들고·테스트·데모할 수 있게 설계했습니다(paper 모드 + mock).
+> ⚠️ **비공식(unofficial) 클라이언트** — 토스증권과 무관하고, 상표/엔도르스먼트와도 무관합니다. 토스 Open API 는 **WTS `설정 > Open API` 에서 키를 발급**받아 쓸 수 있습니다(한도·정책은 사전 공지 없이 바뀔 수 있음). 그래도 라이브 키 없이 전부 만들고·테스트·데모할 수 있게 설계했습니다(paper 모드 + mock).
 
 ---
 
@@ -149,7 +149,7 @@ uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # 98 p
 
 ## 상태 & 면책
 
-- **사전신청 단계** — 토스 Open API 정식 오픈일 미정(2026-06 기준). 한도·정책·엔드포인트가 바뀔 수 있어요. 레퍼런스 문서는 스냅샷이고, canonical `openapi.json` 이 진실입니다.
+- **제공 중** — 토스 Open API 는 WTS `설정 > Open API` 에서 키 발급 가능. 한도·정책·엔드포인트는 사전 공지 없이 바뀔 수 있어요. 레퍼런스 문서는 스냅샷이고, canonical `openapi.json` 이 진실입니다.
 - **본인 키로 본인 계좌를 직접 돌리는 도구**입니다. 남의 계좌 대리매매·유료 매매신호 제공은 만들지 않습니다(규제 회피 아니라 의도적 비목표).
 - 투자 판단과 그 결과는 전적으로 본인 책임입니다.
 

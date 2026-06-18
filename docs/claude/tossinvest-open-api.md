@@ -8,14 +8,14 @@
 - **문서 허브**: https://developers.tossinvest.com/docs · AI/평문용 `https://developers.tossinvest.com/llms.txt` · 개요 `…/openapi-docs/overview.md`
 - **Base URL**: `https://openapi.tossinvest.com` (모든 경로 prefix)
 - **연동**: REST only. **WebSocket/실시간 스트리밍 없음** → 실시간이 필요하면 폴링(+ rate limit 고려).
-- **검증 시점**: 2026-06-17. ⚠ 사전신청 단계라 한도·정책·엔드포인트가 정식 오픈 전까지 바뀔 수 있다.
+- **검증 시점**: 2026-06-19(canonical 재확인). ⚠ 한도·정책·엔드포인트는 사전 공지 없이 바뀔 수 있다.
 - **이 문서는 스냅샷이다 — 막히거나 의심되면 반드시 공식 문서를 본다**: 권위 순서는 ① openapi.json(canonical 스펙) → ② [developers.tossinvest.com/docs](https://developers.tossinvest.com/docs)(인터랙티브) → ③ 본 문서. 이 문서에 없는 필드·새 엔드포인트·세부 enum·정확한 한도 수치는 위 openapi.json 을 source of truth 로 삼아 재확인. (LLM/스크립트면 `…/openapi-docs/overview.md` + `…/api-reference/README.md` 가 평문이라 파싱 쉽다.)
 
-## 0. 사전신청 / 자격 (시점 한정 정보)
+## 0. 자격 / 키 발급 (시점 한정 정보)
 
-- 대상: **토스증권 계좌 보유자**. 토스증권 홈페이지/앱에서 약관 동의 → 본인인증 → 계좌인증으로 사전신청.
-- 사전신청 후 **순차 오픈 알림** → **토스증권 WTS(PC 웹)** 의 `설정 > Open API` 메뉴에서 `client_id` / `client_secret` 발급.
-- 정식 오픈일: **미정**(2026-06 기준). 국내주식 수수료 2026-06 까지 면제 프로모션 안내가 있었음(시점 한정, 신청 시 재확인).
+- 대상: **토스증권 계좌 보유자**. canonical overview 는 사전신청/대기자 단계 없이 **WTS 에서 직접 키 발급**만 안내(아래) — 2026-06-17 스냅샷의 "약관동의→본인인증→사전신청→순차 오픈 알림" 게이트는 더는 문서에 없음(2026-06-19 재확인).
+- **토스증권 WTS(PC 웹)** 로그인 → `설정 > Open API` 메뉴에서 `client_id` / `client_secret` 발급(셀프서비스).
+- 국내주식 수수료 2026-06 까지 면제 프로모션 안내가 있었음(시점 한정, 신청 시 재확인).
 - 현재 `accounts` 는 **종합매매(BROKERAGE) 계좌만** 반환. 자녀계좌 사용 불가.
 
 ---
