@@ -4,7 +4,7 @@
 - **커밋/푸시/머지는 요청 시에만**. 브랜치 전략은 `main` 단일. feature 작업은 `feat/<name>` 브랜치 → 리뷰 후 머지.
 - **돈/수량 float 금지** — 전구간 **문자열/Decimal**. SDK 의 `pytossinvest.money.to_decimal` 이 float 를 `TypeError` 로 거부(강제). MCP 레이어도 입출력 모두 문자열 유지(JSON/Decimal 안전).
 - **SDK 공개 API 깨지 말 것** — `pytossinvest-mcp` 가 `pytossinvest` 에 의존. SDK 시그니처/반환 타입 변경 시 **MCP 테스트도 그린 확인** 후 진행.
-- **`place_order` 안전 불변식 (프로젝트 핵심)** — 체결 경로(`paper.place` / `client.place_order`)는 **반드시 `safety.check_guardrails` 를 거친다**. confirmation 토큰은 `preview_order` 에서만, 가드레일 통과 후 발급. `place_order` 는 `consume(token)` → 실행 → **성공 시에만 `finalize`**(실패하면 토큰 살아남아 같은 `clientOrderId` 로 멱등 재시도). 이 불변식을 우회하는 변경 금지. **modify 도 동형 2단계**(`preview_modify`→`modify_order(confirmation_token)`): consume → 가드레일 재검사(**델타 회계** — `check_daily=True, prev_notional=원본명목`, 일일 증분=`new−old`만 검사) → 실행 → 성공 시 `finalize(델타)`(pop + 부호있는 델타 가산, `record_spend` 0-하한) / 실패 시 토큰 유지. 우회 금지.
+- **`place_order` 안전 불변식 (프로젝트 핵심)** — 체결 경로(`paper.place` / `client.place_order`)는 **반드시 `safety.check_guardrails` 를 거친다**. confirmation 토큰은 `preview_order` 에서만, 가드레일 통과 후 발급. `place_order` 는 `consume(token)` → `check_guardrails(check_daily=False)` → **`reserve`(원자적·`clientOrderId` 멱등성)** → 실행 → **성공 시 `commit`(일일 누적 확정) / 실패 시 `release`(예약 해제, 토큰은 유지)** → 실패 시 동일 `clientOrderId` 로 멱등 재시도. 이 불변식을 우회하는 변경 금지. **modify 도 동형 2단계**(`preview_modify`→`modify_order(confirmation_token)`): consume → 가드레일 재검사(**델타 회계** — `check_daily=True, prev_notional=원본명목`, 일일 증분=`new−old`만 검사) → **`reserve(signed delta)`** → 실행 → 성공 시 **`commit(delta)`**(부호있는 델타 가산, `record_spend` 0-하한) / 실패 시 **`release(delta)`**(예약 해제, 토큰 유지). 우회 금지.
 
 # 토스증권 Open API 오픈소스 (pytossinvest + pytossinvest-mcp)
 
@@ -39,7 +39,7 @@ uv sync --package pytossinvest-mcp --extra dev
 
 # 테스트
 uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (59) — respx mock
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (112) — FakeClient
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (142) — FakeClient
 
 # MCP 서버 실행 (stdio — Claude Desktop/Cursor 등 MCP 클라이언트용)
 TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
@@ -50,7 +50,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 
 - **money/quantity**: 전부 문자열/Decimal. float 진입 경로 자체를 안 만든다. (위 CRITICAL RULES)
 - **SDK 규약** (`pytossinvest`): 응답 `result` 자동 언래핑(토큰 엔드포인트 제외)·**`code` 기반 에러 분기**(unknown code 관용)·**`X-RateLimit-*` 헤더가 진실**(표 숫자 하드코딩 금지)·`accountSeq` 1회 캐싱(ACCOUNT 1/s)·**`clientOrderId` 멱등성 수동**(10분). v0.0.2: `X-RateLimit-*` 헤더로 버킷 동적 동기화(헤더가 진실 — 본 그룹은 피크반토막 미적용), 429 **bounded 자동 retry**(`Retry-After` 또는 지수백오프+jitter, `max_retries` 기본 3, `retry_max_wait` 60s 상한) 구현. **5xx·타임아웃은 비재시도**(호출자 책임). 소진 시 종전대로 `RateLimitError` throw.
-- **MCP 안전모델** (`pytossinvest-mcp`): 3모드 `TOSSINVEST_MODE` = `read_only`(주문툴 미등록) / **`paper`**(기본, 로컬 `PaperBroker` 체결) / `live`(`TOSSINVEST_ALLOW_LIVE=1` 까지 있어야 켜짐 — config validator 가 이중게이트). 가드레일(**주문통화별** 주문당·일일 상한·allow/deny·고액 confirm 필수·하드실링 거부 — KRW 1억/30억, USD $10만/$300만, 알파벳=USD·숫자=KRW·FX 환산 X; 장시간 게이트는 live 전용). preview→place / preview_modify→modify 2단계 + consume-on-success 멱등성(modify 는 `finalize(델타)`) + place 시 일일한도 재검사 + 부팅 시 감사로그로 당일 누적 복원 + 감사로그(JSONL).
+- **MCP 안전모델** (`pytossinvest-mcp`): 3모드 `TOSSINVEST_MODE` = `read_only`(주문툴 미등록) / **`paper`**(기본, 로컬 `PaperBroker` 체결) / `live`(`TOSSINVEST_ALLOW_LIVE=1` 까지 있어야 켜짐 — config validator 가 이중게이트). 가드레일(**주문통화별** 주문당·일일 상한·allow/deny·고액 confirm 필수·하드실링 거부 — KRW 1억/30억, USD $10만/$300만, 알파벳=USD·숫자=KRW·FX 환산 X; 장시간 게이트는 live 전용). preview→place / preview_modify→modify 2단계 + **reserve-first 멱등성**(시도 시 원자적 예약 → 실패 시 release → 성공 시 commit; modify 도 부호있는 delta로 동형) + place 시 일일한도 재검사 + 부팅 시 감사로그로 당일 누적 복원 + 감사로그(JSONL). **상태 백엔드**: `TOSSINVEST_STATE_BACKEND`=`memory`(기본·단일인스턴스) / `redis`(`TOSSINVEST_REDIS_URL` 필요·HA) — `TokenStore`/`SpendStore` 심을 통해 교체 가능. redis 시 counter 가 진실의 원천(AOF), 부팅 복원 no-op.
 - **설정**: `pytossinvest-mcp` 는 `pydantic-settings`, env prefix `TOSSINVEST_` (`MODE`/`ALLOW_LIVE`/`CLIENT_ID`/`CLIENT_SECRET`/`MAX_ORDER_AMOUNT`/`DAILY_ORDER_LIMIT`/`ALLOW_SYMBOLS`/`DENY_SYMBOLS`/`ENFORCE_MARKET_HOURS`/`MAX_ORDER_AMOUNT_USD`/`DAILY_ORDER_LIMIT_USD`/`LIVE_CONFIRM_MIN_DELAY_SEC`/`STATE_BACKEND`/`REDIS_URL`). 상세는 `pytossinvest-mcp/README.md`.
 - **라이선스**: SDK=**MIT**, MCP=**Apache-2.0**. 각 패키지에 `LICENSE`(+MCP `NOTICE`) + `pyproject.toml` `license` 필드. README 에 명시. "비공식(unofficial) 클라이언트" 표기로 토스 상표/엔도르스먼트 오해 방지.
 
@@ -66,6 +66,12 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 - **modify 델타 회계(M1)** — modify 는 일일 버킷에 **부호있는 델타**(`new−old`)를 검사·가산. `preview_modify` 가 원본 주문 명목(`get_order` 의 price×qty)을 `spec.prev_notional` 로 잡고, 일일검사는 증분만(`spent+delta>cap` 이면 `daily-limit`), per-order/고액/하드실링은 여전히 전액. 성공 시 `finalize(델타)`, `record_spend` 가 0-하한. 한계: 일일버킷은 단순합이라 앱에서 직접 낸 주문을 다운사이즈하면 credit 되어 한도가 느슨해질 수 있음(0-하한으로 음수만 방지). 부팅복원은 `placed`+`modified` 델타 합산 후 0-하한.
 - **_spent 부팅 복원** — `place`/`modify` 감사에 `currency`+`notional`(델타) 기록, 서버 시작 시 `audit.read_events()`→`safety.restore_spend` 가 당일(UTC ts→KST 날짜) `placed`+`modified` 합산 후 통화별 0-하한. 감사 파일 지우면 당일 누적도 리셋됨(주의). `restore_spend` 는 dict 가 아닌 이벤트나 `notional` 누락/파싱 불가 이벤트를 조용히 건너뜀(손상 감사 파일이 있어도 부팅 불가 없음).
 - **Round 2 하드닝 추가 사항** — `build_spec` 에서 `order_amount` 를 `price` 또는 `quantity` 와 같이 전달하면 `invalid-order-params` 에러(동시 전달 금지). deny/allow 심볼 매칭은 양쪽을 `.strip().upper()` 정규화하여 대소문자·앞뒤 공백 무시(단, `spec.symbol` 자체는 변경 안 함 — 브로커로 원본 전달). SDK 200 경로가 `(ValueError, RecursionError)` 모두 `invalid-response` 로 처리(깊이 중첩된 JSON 이 부팅 크래시 내지 않음).
+- **상태 백엔드 심(seam) — memory|redis + reserve-first** — `TokenStore`/`SpendStore` 인터페이스로 백엔드 교체. place 흐름: `reserve`(원자적, `clientOrderId` 멱등) → 실행 → 성공 `commit` / 실패 `release`. modify 도 `reserve(signed delta)` → `commit/release` 동형. 백엔드 선택은 `TOSSINVEST_STATE_BACKEND`(`memory`/`redis`).
+- **`_guard_store` fail-closed** — store I/O 중 `ConnectionError`/`Timeout`/`OSError` 는 `GuardrailError("state-unavailable")`로 변환(fail-closed). `GuardrailError` 자체는 절대 삼키지 않는다.
+- **redis 일일 카운터는 Decimal 문자열 + 분산락 RMW** — day-scope key에 `Lock` + Python Decimal RMW. `INCR`/`INCRBYFLOAT` 금지(돈/수량 float 규칙 동일 적용).
+- **`fakeredis[lua]` 필수** — redis-py `Lock.release()`는 내부적으로 EVALSHA(Lua)를 사용. fakeredis 의 lua 서브패키지가 없으면 Lock.release()에서 `ResponseError` 발생. 실제 Redis 에는 Lua가 기본 내장.
+- **redis 백엔드에서 `restore_spend`/`seed` 는 no-op** — redis counter 가 진실의 원천(AOF). memory 백엔드만 부팅 시 감사 리플레이로 복원. redis 백엔드에서 감사 파일을 지워도 counter는 유지된다.
+- **redis + 다중 인스턴스 시 paper 상태는 여전히 per-instance** — redis로 `TokenStore`/`SpendStore`는 공유되지만, `PaperBroker`(paper 포지션·현금)는 인스턴스 로컬. 다중 인스턴스 paper 공유는 별도 플랜(Plan 2). transport는 현재 stdio 단일.
 
 ## 추가 문서 (docs/)
 

@@ -13,6 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "fakeredis[lua]>=2"]
+redis = ["redis>=5"]
 
 [project.scripts]
 pytossinvest-mcp = "pytossinvest_mcp.server:main"
@@ -30,3 +31,4 @@ pytossinvest = { workspace = true }
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["integration: requires a real Redis (opt-in, skipped by default)"]
