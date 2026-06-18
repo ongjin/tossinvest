@@ -55,7 +55,14 @@ def build_app_context(settings: Settings, *, client) -> AppContext:
 
 def build_server(settings: Settings, *, client) -> FastMCP:
     app = build_app_context(settings, client=client)
-    mcp = FastMCP("pytossinvest-mcp", stateless_http=(settings.transport == "http"))
+    kwargs = {"stateless_http": settings.transport == "http"}
+    if settings.transport == "http":
+        # The bearer middleware (http.py) is the entire auth surface; the deploy host is
+        # operator/proxy-controlled and unknown at build time, so FastMCP's localhost-only
+        # DNS-rebinding default would 421 every real remote client. Auth = bearer, not Host.
+        from mcp.server.transport_security import TransportSecuritySettings
+        kwargs["transport_security"] = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    mcp = FastMCP("pytossinvest-mcp", **kwargs)
     _register_reads(mcp, app)
     if settings.mode != "read_only":
         _register_writes(mcp, app)

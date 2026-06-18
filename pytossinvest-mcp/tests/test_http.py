@@ -41,3 +41,30 @@ def test_build_http_app_mounts_auth_on_real_mcp_endpoint():
     # the streamable endpoint is /mcp; without a bearer the middleware 401s
     # BEFORE any MCP handling, proving the guard wraps the real app.
     assert client.get("/mcp").status_code == 401
+
+
+def test_http_accepts_non_localhost_host(tmp_path):
+    from conftest import FakeClient
+    from pytossinvest_mcp.config import Settings
+    from pytossinvest_mcp.server import build_server
+    from pytossinvest_mcp.http import build_http_app
+
+    settings = Settings(_env_file=None, transport="http", auth_token="secret",
+                        mode="read_only", audit_log_path=str(tmp_path / "audit.log"))
+    mcp = build_server(settings, client=FakeClient())
+    app = build_http_app(mcp, auth_token="secret")
+
+    # A real MCP initialize, authorized, with a NON-localhost Host (what a remote client / proxy sends).
+    # Pre-fix: FastMCP's localhost-only DNS-rebinding default 421s this request.
+    # Post-fix: bearer auth is the entire auth surface; deploy host is proxy-controlled.
+    init = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "t", "version": "1"}}}
+    with TestClient(app) as client:
+        r = client.post("/mcp", json=init, headers={
+            "Authorization": "Bearer secret",
+            "Accept": "application/json, text/event-stream",
+            "Host": "mcp.example.com",
+        })
+    assert r.status_code != 421          # the bug: localhost-only DNS-rebinding default
+    assert r.status_code == 200          # initialize succeeds through the wrapped /mcp app
