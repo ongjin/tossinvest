@@ -28,3 +28,13 @@ def test_daily_cap_parity(app_factory, backend):
     with pytest.raises(GuardrailError, match="daily-limit"):
         T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
                         quantity="1", price="70000")  # 140000 > 100000 cap
+
+
+def test_paper_place_parity(app_factory, backend):
+    app = app_factory(mode="paper", backend=backend)
+    prev = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                           quantity="1", price="70000")
+    res = T.place_order(app, confirmation_token=prev["confirmationToken"])
+    assert res["status"] == "FILLED"
+    h = T.get_holdings(app)
+    assert h["items"][0]["quantity"] == "1"

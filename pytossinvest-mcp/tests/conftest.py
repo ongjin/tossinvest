@@ -6,9 +6,8 @@ import pytest
 from pytossinvest.models import Account, BuyingPower, Price
 from pytossinvest_mcp.audit import AuditLog
 from pytossinvest_mcp.config import Settings
-from pytossinvest_mcp.paper import PaperBroker, MemoryPaperStore
+from pytossinvest_mcp.paper import PaperBroker
 from pytossinvest_mcp.safety import SafetyManager
-from pytossinvest_mcp.stores import MemoryTokenStore, MemorySpendStore
 from pytossinvest_mcp.tools import AppContext
 
 KST = ZoneInfo("Asia/Seoul")
@@ -102,17 +101,21 @@ def fake_client():
 def _make_stores(backend):
     if backend == "redis":
         import fakeredis
-        from pytossinvest_mcp.redis_stores import RedisTokenStore, RedisSpendStore
+        from pytossinvest_mcp.redis_stores import RedisTokenStore, RedisSpendStore, RedisPaperStore
         r = fakeredis.FakeStrictRedis(decode_responses=True)
-        return RedisTokenStore(r), RedisSpendStore(r)
-    return MemoryTokenStore(), MemorySpendStore()
+        return (RedisTokenStore(r), RedisSpendStore(r),
+                RedisPaperStore(r, starting_cash="10000000"))
+    from pytossinvest_mcp.stores import MemoryTokenStore, MemorySpendStore
+    from pytossinvest_mcp.paper import MemoryPaperStore
+    return (MemoryTokenStore(), MemorySpendStore(),
+            MemoryPaperStore(starting_cash="10000000"))
 
 
 def make_app(fake_client, tmp_path, *, mode="paper", backend="memory", now_kst=None, **settings_kw):
     settings = Settings(_env_file=None, mode=mode,
                         audit_log_path=str(tmp_path / "audit.log"), **settings_kw)
-    paper = PaperBroker(MemoryPaperStore(starting_cash=settings.paper_starting_cash), next_id=_counter("paper"))
-    token_store, spend_store = _make_stores(backend)
+    token_store, spend_store, paper_store = _make_stores(backend)
+    paper = PaperBroker(paper_store, next_id=_counter("paper"))
     safety = SafetyManager(settings, now=lambda: 1000.0, today=lambda: date(2026, 6, 17),
                            gen_id=_counter("cli"),
                            token_store=token_store, spend_store=spend_store)

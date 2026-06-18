@@ -63,3 +63,14 @@ def test_two_brokers_share_state(r):
     # instance b sees instance a's fill
     assert b.sellable_quantity("005930") == Decimal("1")
     assert b.holdings()["items"][0]["quantity"] == "1"
+
+
+def test_concurrent_same_coid_single_fill(r):
+    a = _broker(r, cash="1000000")
+    b = PaperBroker(RedisPaperStore(r, starting_cash="1000000"))
+    o1 = a.place(symbol="005930", side="BUY", order_type="LIMIT",
+                 fill_price="70000", quantity="1", client_order_id="same")
+    o2 = b.place(symbol="005930", side="BUY", order_type="LIMIT",
+                 fill_price="70000", quantity="1", client_order_id="same")
+    assert o1.order_id == o2.order_id           # dedup across instances
+    assert len(a.list_orders()) == 1            # one fill total

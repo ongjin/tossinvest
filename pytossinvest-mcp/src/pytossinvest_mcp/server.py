@@ -8,7 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .audit import AuditLog
 from .config import Settings
-from .paper import PaperBroker, MemoryPaperStore
+from .paper import PaperBroker
 from .safety import SafetyManager
 from .tools import AppContext
 from . import tools as T
@@ -23,17 +23,22 @@ def _redis_from_url(url: str):
 
 def _build_stores(settings: Settings):
     if settings.state_backend == "redis":
-        from .redis_stores import RedisTokenStore, RedisSpendStore
+        from .redis_stores import RedisTokenStore, RedisSpendStore, RedisPaperStore
         from .audit import RedisAuditSink
         r = _redis_from_url(settings.redis_url)
-        return RedisTokenStore(r), RedisSpendStore(r), RedisAuditSink(r)
+        return (RedisTokenStore(r), RedisSpendStore(r),
+                RedisAuditSink(r),
+                RedisPaperStore(r, starting_cash=settings.paper_starting_cash))
     from .stores import MemoryTokenStore, MemorySpendStore
-    return MemoryTokenStore(), MemorySpendStore(), AuditLog(settings.audit_log_path)
+    from .paper import MemoryPaperStore
+    return (MemoryTokenStore(), MemorySpendStore(),
+            AuditLog(settings.audit_log_path),
+            MemoryPaperStore(starting_cash=settings.paper_starting_cash))
 
 
 def build_app_context(settings: Settings, *, client) -> AppContext:
-    paper = PaperBroker(MemoryPaperStore(starting_cash=settings.paper_starting_cash))
-    token_store, spend_store, audit = _build_stores(settings)
+    token_store, spend_store, audit, paper_store = _build_stores(settings)
+    paper = PaperBroker(paper_store)
     safety = SafetyManager(
         settings,
         now=_time.monotonic,
