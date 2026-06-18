@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     def _redis_requires_url(self):
         if self.state_backend == "redis" and not self.redis_url:
             raise ValueError(
-                "state_backend='redis' requires redis_url"
+                "state_backend='redis' requires TOSSINVEST_REDIS_URL"
             )
         return self
 

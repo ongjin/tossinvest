@@ -4,9 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from pytossinvest_mcp.audit import AuditLog
-
-fakeredis = pytest.importorskip("fakeredis")
+from pytossinvest_mcp.audit import AuditLog, RedisAuditSink
 
 
 def _fixed_clock():
@@ -57,7 +55,7 @@ def test_read_events_missing_file_is_empty(tmp_path):
 
 
 def test_redis_audit_record_and_read():
-    from pytossinvest_mcp.audit import RedisAuditSink
+    fakeredis = pytest.importorskip("fakeredis")
 
     r = fakeredis.FakeStrictRedis(decode_responses=True)
     sink = RedisAuditSink(

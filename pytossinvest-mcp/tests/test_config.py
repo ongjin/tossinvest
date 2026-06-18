@@ -69,7 +69,7 @@ def test_state_backend_defaults_to_memory():
 
 
 def test_redis_backend_requires_url():
-    with pytest.raises(ValueError, match="redis_url"):
+    with pytest.raises(ValueError, match="TOSSINVEST_REDIS_URL"):
         _settings(state_backend="redis")
 
 
