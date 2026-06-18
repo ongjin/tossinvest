@@ -50,6 +50,7 @@ tools.py      ← AppContext + 툴 함수 fn(app, ...). 라우팅(paper vs real)
 - **`run_server(settings, mcp)`**: http 면 `build_http_app(mcp, auth_token=settings.auth_token)` → `serve_http(app, host, port)`. stdio 면 `mcp.run()`.
 - **`http.py`**: `BearerAuthMiddleware(BaseHTTPMiddleware)` — `hmac.compare_digest` 상수시간 bearer 검증, 실패 시 401. `build_http_app(mcp, *, auth_token)` — `mcp.streamable_http_app()` 에 미들웨어 추가 후 Starlette 앱 반환. `serve_http(app, *, host, port)` — uvicorn runner(함수 내부에서만 `import uvicorn` — `[http]` extra).
 - **직교성**: transport 축은 `MODE`(read_only/paper/live) 및 `STATE_BACKEND`(memory/redis)와 독립. 어떤 조합이든 동작. 다중 인스턴스 HA = `http` + `redis` 백엔드 조합 권장.
+- **Phase 2(인스턴스 간 공유 레이트리미터·OAuth 토큰캐시)는 의도적 보류 (2026-06-19 결정, YAGNI)** — redis 백엔드가 공유하는 건 **spend 카운터·paper 상태·confirmation 토큰**까지다. **SDK 의 레이트리밋(`ratelimit.TokenBucket`)과 OAuth 토큰(`auth.TokenManager`)은 여전히 프로세스 로컬**이라, 다중 인스턴스를 동시에 띄우면 각자 별도 버킷/토큰을 갖는다(토스 per-account 한도는 인스턴스 간 미공유 — 초과 시 `X-RateLimit-*` 헤더동기화 + 429 bounded retry 로 수습). 단일테넌트(유저 1명)·저부하라 **1-인스턴스로 충분**하므로 공유 토큰버킷은 만들지 않았다. 진짜로 여러 인스턴스를 LB 뒤에서 동시 구동해 한도를 공유해야 하는 실수요가 생기면 그때 SDK 에 seam 을 뚫는다(설계 시점 기록: `docs/superpowers/specs/2026-06-18-self-host-remote-mcp-design.md §8` Phase 2).
 
 ## 가드레일 (`safety.check_guardrails`, 순서 중요)
 
