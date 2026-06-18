@@ -7,7 +7,7 @@
 LLM(Claude Desktop/Cursor 등)에 토스 계좌 읽기/거래를 **안전하게** 쥐여주는 MCP 서버. **Apache-2.0**. `pytossinvest` SDK 의존. **stdio** 트랜스포트.
 
 - 위치: `pytossinvest-mcp/src/pytossinvest_mcp/`
-- 테스트: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests` (FakeClient + paper 엔진, 142개, **라이브 키 불필요**)
+- 테스트: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests` (FakeClient + paper 엔진, 151개, **라이브 키 불필요**)
 - 의존: `mcp`(FastMCP), `pydantic-settings`, `pytossinvest`. 옵션 extra: `redis = ["redis>=5"]`(HA 백엔드). dev extra: `fakeredis[lua]>=2`(테스트).
 
 ## 🔒 안전 불변식 (이 프로젝트의 핵심 — 절대 깨지 말 것)
@@ -111,9 +111,26 @@ deny심볼 → allow심볼 → **하드실링 초과 무조건 거부**(`max-ord
 
 store I/O (`reserve`/`release`/`commit`/`seed`) 중 `ConnectionError`/`Timeout`/`OSError` 발생 시 → `GuardrailError("state-unavailable")`로 변환(fail-closed). `GuardrailError` 자체는 절대 삼키지 않는다 — 항상 호출자에게 전파.
 
+### PaperStore 심 (`paper.py` + `redis_stores.py`)
+
+`PaperBroker`는 `PaperStore` 인터페이스(`lock() → context manager`, `load() → PaperState`, `save(state)`)를 통해 상태를 읽고 쓴다. 백엔드는 `state_backend` 설정값에 따라 `server.py` 의 `_build_stores`(4-tuple 반환)에서 선택된다.
+
+**`MemoryPaperStore`** (기본, `paper.py`):
+- 인스턴스 로컬 — 재시작 시 휘발. `lock()` 은 `nullcontext`(단일 스레드 가정).
+
+**`RedisPaperStore`** (`redis_stores.py`):
+- `state_backend=="redis"` 일 때 선택 — `TokenStore`/`SpendStore`와 동일한 redis client 공유.
+- 단일 JSON 키 **`paper`** 에 `PaperState` 전체를 직렬화(읽기 `GET paper`, 쓰기 `SET paper`).
+- 뮤테이션은 redis-py `Lock(f"lock:{key}")` = **`lock:paper`** 락 아래에서만. `PaperBroker.place()` 의 `clientOrderId` 멱등 체크도 이 락 안에서 수행(기존 주문 있으면 두 번째 체결 없이 반환).
+- **다중 인스턴스 공유·재시작 생존** — AOF/RDB 지속 redis라면 재시작 후 paper 상태 복원.
+
+**`PaperState` 필드**: `cash`(Decimal)·`positions`(symbol→Position)·`orders`(list[PaperOrder])·`realized_pnl`(Decimal)·`counter`(int).
+
+**직렬화 규칙**: 모든 금액/수량(`cash`, `realized_pnl`, `quantity`, `avg_price`, `price`) = Decimal 문자열(`str()`로 쓰기, `to_decimal()`로 읽기). **float 금지**.
+
 ### 한계 (현재 단계)
 
-`redis` 백엔드로 `TokenStore`/`SpendStore` 는 여러 인스턴스에서 공유되지만, `PaperBroker`(paper 포지션·현금)는 인스턴스 로컬이다. 다중 인스턴스 paper 공유는 Plan 2, transport는 현재 stdio.
+transport는 현재 stdio 단일. 다중 인스턴스 redis paper 공유는 가능하나 동시 paper 충돌 시 lock 대기 시간(기본 5s)이 생길 수 있다.
 
 ## 14 툴 (`server.py` 등록, `tools.py` 구현)
 
