@@ -76,3 +76,29 @@ def test_redis_backend_requires_url():
 def test_redis_backend_with_url_ok():
     s = _settings(state_backend="redis", redis_url="redis://localhost:6379/0")
     assert s.state_backend == "redis"
+
+
+def test_transport_defaults_to_stdio():
+    s = Settings(_env_file=None)
+    assert s.transport == "stdio"
+    assert s.http_host == "127.0.0.1"
+    assert s.http_port == 8000
+    assert s.auth_token == ""
+
+
+def test_http_without_auth_token_raises():
+    with pytest.raises(ValueError, match="TOSSINVEST_AUTH_TOKEN"):
+        Settings(_env_file=None, transport="http")
+
+
+def test_http_with_auth_token_ok():
+    s = Settings(_env_file=None, transport="http", auth_token="secret",
+                 http_host="0.0.0.0", http_port=9000)
+    assert s.transport == "http"
+    assert s.http_host == "0.0.0.0"
+    assert s.http_port == 9000
+
+
+def test_stdio_needs_no_auth_token():
+    s = Settings(_env_file=None, transport="stdio")  # must not raise
+    assert s.transport == "stdio"

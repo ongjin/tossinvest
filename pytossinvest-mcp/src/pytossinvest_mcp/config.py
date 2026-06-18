@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     state_backend: Literal["memory", "redis"] = "memory"
     redis_url: str = ""
 
+    # remote transport (default stdio = unchanged). http requires auth_token too.
+    transport: Literal["stdio", "http"] = "stdio"
+    http_host: str = "127.0.0.1"
+    http_port: int = 8000
+    auth_token: str = ""
+
     @field_validator(
         "max_order_amount", "daily_order_limit", "paper_starting_cash",
         "max_order_amount_usd", "daily_order_limit_usd", mode="before",
@@ -69,6 +75,15 @@ class Settings(BaseSettings):
         if self.state_backend == "redis" and not self.redis_url:
             raise ValueError(
                 "state_backend='redis' requires TOSSINVEST_REDIS_URL"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _http_requires_auth_token(self):
+        if self.transport == "http" and not self.auth_token:
+            raise ValueError(
+                "transport='http' requires TOSSINVEST_AUTH_TOKEN (an exposed "
+                "endpoint must be authenticated)"
             )
         return self
 
