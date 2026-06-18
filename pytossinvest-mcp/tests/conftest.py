@@ -6,7 +6,7 @@ import pytest
 from pytossinvest.models import Account, BuyingPower, Price
 from pytossinvest_mcp.audit import AuditLog
 from pytossinvest_mcp.config import Settings
-from pytossinvest_mcp.paper import PaperBroker
+from pytossinvest_mcp.paper import PaperBroker, MemoryPaperStore
 from pytossinvest_mcp.safety import SafetyManager
 from pytossinvest_mcp.stores import MemoryTokenStore, MemorySpendStore
 from pytossinvest_mcp.tools import AppContext
@@ -111,7 +111,7 @@ def _make_stores(backend):
 def make_app(fake_client, tmp_path, *, mode="paper", backend="memory", now_kst=None, **settings_kw):
     settings = Settings(_env_file=None, mode=mode,
                         audit_log_path=str(tmp_path / "audit.log"), **settings_kw)
-    paper = PaperBroker(starting_cash=settings.paper_starting_cash, next_id=_counter("paper"))
+    paper = PaperBroker(MemoryPaperStore(starting_cash=settings.paper_starting_cash), next_id=_counter("paper"))
     token_store, spend_store = _make_stores(backend)
     safety = SafetyManager(settings, now=lambda: 1000.0, today=lambda: date(2026, 6, 17),
                            gen_id=_counter("cli"),

@@ -45,7 +45,7 @@ def test_preview_then_place_fills_paper_and_audits(app_factory):
                          quantity="10", price="70000")
     out = T.place_order(app, confirmation_token=pv["confirmationToken"])
     assert out["status"] == "FILLED"
-    assert app.paper.cash.__str__() == "9300000"  # 10,000,000 - 700,000
+    assert str(app.paper.buying_power()) == "9300000"  # 10,000,000 - 700,000
     # token now consumed -> second place fails
     with pytest.raises(GuardrailError):
         T.place_order(app, confirmation_token=pv["confirmationToken"])
@@ -89,8 +89,8 @@ def test_place_market_paper_no_ref_price_errors_without_corruption(app_factory, 
     with pytest.raises(PaperError):
         T.place_order(app, confirmation_token=pv["confirmationToken"])
     # no corrupt zero-price fill happened
-    assert app.paper.positions == {}
-    assert str(app.paper.cash) == "10000000"
+    assert app.paper.holdings()["items"] == []
+    assert str(app.paper.buying_power()) == "10000000"
 
 
 def test_place_audit_records_currency_and_notional(app_factory):

@@ -8,7 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .audit import AuditLog
 from .config import Settings
-from .paper import PaperBroker
+from .paper import PaperBroker, MemoryPaperStore
 from .safety import SafetyManager
 from .tools import AppContext
 from . import tools as T
@@ -32,7 +32,7 @@ def _build_stores(settings: Settings):
 
 
 def build_app_context(settings: Settings, *, client) -> AppContext:
-    paper = PaperBroker(starting_cash=settings.paper_starting_cash)
+    paper = PaperBroker(MemoryPaperStore(starting_cash=settings.paper_starting_cash))
     token_store, spend_store, audit = _build_stores(settings)
     safety = SafetyManager(
         settings,
