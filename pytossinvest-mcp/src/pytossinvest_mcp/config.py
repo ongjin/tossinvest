@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # audit
     audit_log_path: str = "pytossinvest-mcp-audit.log"
 
+    # state backend (HA). redis requires redis_url too.
+    state_backend: Literal["memory", "redis"] = "memory"
+    redis_url: str = ""
+
     @field_validator(
         "max_order_amount", "daily_order_limit", "paper_starting_cash",
         "max_order_amount_usd", "daily_order_limit_usd", mode="before",
@@ -57,6 +61,14 @@ class Settings(BaseSettings):
         if self.mode == "live" and not self.allow_live:
             raise ValueError(
                 "mode='live' requires TOSSINVEST_ALLOW_LIVE=1 (double safety gate)"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _redis_requires_url(self):
+        if self.state_backend == "redis" and not self.redis_url:
+            raise ValueError(
+                "state_backend='redis' requires redis_url"
             )
         return self
 

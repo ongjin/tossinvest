@@ -60,3 +60,19 @@ def test_usd_caps_reject_float():
 
 def test_live_confirm_min_delay_default_zero():
     assert _settings().live_confirm_min_delay_sec == 0
+
+
+def test_state_backend_defaults_to_memory():
+    s = _settings()
+    assert s.state_backend == "memory"
+    assert s.redis_url == ""
+
+
+def test_redis_backend_requires_url():
+    with pytest.raises(ValueError, match="redis_url"):
+        _settings(state_backend="redis")
+
+
+def test_redis_backend_with_url_ok():
+    s = _settings(state_backend="redis", redis_url="redis://localhost:6379/0")
+    assert s.state_backend == "redis"
