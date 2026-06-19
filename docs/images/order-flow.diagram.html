@@ -90,20 +90,20 @@ function draw(){
   box(840,338,234,72,PALETTE.blue,["place_order(token)"],{labelSize:20});
   arrow(840,374,762,374);
   box(596,338,166,72,PALETTE.orange,["consume","토큰 검증"],{labelSize:18});
-  arrow(596,374,514,374);  txt(555,328,"+ 일일 재검사",{size:14,color:RED});
+  arrow(596,374,514,374);  txt(555,328,"+ 일일 재검사 · reserve(예약)",{size:14,color:RED});
   box(352,338,162,72,PALETTE.green,["체결","paper / live"],{labelSize:18});
   arrow(352,374,292,374);
   diamond(214,374,152,96,PALETTE.yellow,["성공?"],{labelSize:20});
 
   // 성공 → finalize → 결과
   arrow(214,422,214,460);  txt(230,448,"성공",{size:15,color:"#666",anchor:"start"});
-  box(122,462,186,64,PALETTE.green,["finalize","토큰 소비 · 일일 기록"],{labelSize:17});
+  box(122,462,186,64,PALETTE.green,["commit","토큰 소비 · 일일 확정"],{labelSize:17});
   arrow(308,494,396,494);
   box(396,462,190,64,PALETTE.yellow,["주문 결과 반환"],{labelSize:20});
 
   // 실패 → 재시도 루프 (토큰 유지)
   curveArrow([[214,326],[440,250],[770,250],[868,336]],{stroke:RED,sw:2,dash:[7,7]});
-  txt(560,242,"실패 → 토큰 유지 · 같은 clientOrderId 로 재시도 (멱등)",{size:19,color:RED});
+  txt(560,242,"실패 → release(예약 해제) · 토큰 유지 · 같은 clientOrderId 로 멱등 재시도",{size:19,color:RED});
   /* ======================== end replace ======================== */
 
   document.getElementById("flag").textContent="DIAGRAM-READY";
