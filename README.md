@@ -9,7 +9,7 @@ decimal·레이트리밋·멱등성까지 제대로 다룬 **SDK** + LLM 에게 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![SDK](https://img.shields.io/badge/SDK-MIT-3da639)
 ![MCP](https://img.shields.io/badge/MCP%20server-Apache--2.0-d22128)
-![tests](https://img.shields.io/badge/tests-225%20passing-2ea44f)
+[![CI](https://github.com/ongjin/tossinvest/actions/workflows/ci.yml/badge.svg)](https://github.com/ongjin/tossinvest/actions/workflows/ci.yml)
 ![status](https://img.shields.io/badge/Toss%20API-available-2ea44f)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 

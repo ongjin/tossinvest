@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+      - name: SDK tests (pytossinvest)
+        run: uv run --package pytossinvest --extra dev pytest pytossinvest/tests
+      - name: MCP tests (pytossinvest-mcp)
+        run: uv run --package pytossinvest-mcp --extra dev pytest pytossinvest-mcp/tests
