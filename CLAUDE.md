@@ -26,6 +26,7 @@ toss/
 │   └── src/pytossinvest/          # money · errors · ratelimit · auth · models · client
 ├── pytossinvest-mcp/                # MCP 서버 (Apache-2.0)
 │   └── src/pytossinvest_mcp/        # config · audit · paper · market_hours · safety · tools · server
+├── examples/                       # 키 없이 실행되는 데모 (sdk_quickstart · mcp_paper_demo)
 └── docs/
     ├── claude/tossinvest-open-api.md          # ★ 토스 API 레퍼런스 (코어 — 코드 손대기 전 읽기)
     └── superpowers/specs|plans/               # 설계 스펙 + 구현 플랜 (Plan 1 SDK / Plan 2 MCP)

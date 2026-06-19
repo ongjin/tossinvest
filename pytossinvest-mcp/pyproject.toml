@@ -5,6 +5,17 @@ description = "MCP server giving an LLM safe read/trade access to a Toss Securit
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
+authors = [{ name = "ongjin" }]
+keywords = ["mcp", "model-context-protocol", "toss", "tossinvest", "trading", "brokerage", "llm", "claude", "ai-agent", "ai-safety"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
 dependencies = [
     "pytossinvest",
     "mcp>=1.12",
@@ -15,6 +26,11 @@ dependencies = [
 dev = ["pytest>=8", "fakeredis[lua]>=2"]
 redis = ["redis>=5"]
 http = ["uvicorn>=0.30"]
+
+[project.urls]
+Homepage = "https://github.com/ongjin/tossinvest"
+Repository = "https://github.com/ongjin/tossinvest"
+Issues = "https://github.com/ongjin/tossinvest/issues"
 
 [project.scripts]
 pytossinvest-mcp = "pytossinvest_mcp.server:main"

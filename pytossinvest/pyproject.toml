@@ -5,10 +5,26 @@ description = "Unofficial Python client for the Toss Securities Open API"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
+authors = [{ name = "ongjin" }]
+keywords = ["toss", "tossinvest", "toss-securities", "stock", "trading", "brokerage", "korea", "openapi", "api-client"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
 dependencies = ["httpx>=0.27", "pydantic>=2.7"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "respx>=0.21"]
+
+[project.urls]
+Homepage = "https://github.com/ongjin/tossinvest"
+Repository = "https://github.com/ongjin/tossinvest"
+Issues = "https://github.com/ongjin/tossinvest/issues"
 
 [build-system]
 requires = ["hatchling"]
