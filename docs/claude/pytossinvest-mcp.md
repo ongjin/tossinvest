@@ -7,7 +7,7 @@
 LLM(Claude Desktop/Cursor 등)에 토스 계좌 읽기/거래를 **안전하게** 쥐여주는 MCP 서버. **Apache-2.0**. `pytossinvest` SDK 의존. **stdio**(기본) 또는 **http** 트랜스포트.
 
 - 위치: `pytossinvest-mcp/src/pytossinvest_mcp/`
-- 테스트: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests` (FakeClient + paper 엔진, 166개, **라이브 키 불필요**)
+- 테스트: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests` (FakeClient + paper 엔진, 179개, **라이브 키 불필요**)
 - 의존: `mcp`(FastMCP), `pydantic-settings`, `pytossinvest`. 옵션 extra: `redis = ["redis>=5"]`(HA 백엔드), `http = ["uvicorn>=0.30"]`(http 트랜스포트). dev extra: `fakeredis[lua]>=2`(테스트).
 
 ## 🔒 안전 불변식 (이 프로젝트의 핵심 — 절대 깨지 말 것)
@@ -138,9 +138,15 @@ store I/O (`reserve`/`release`/`commit`/`seed`) 중 `ConnectionError`/`Timeout`/
 - 뮤테이션은 redis-py `Lock(f"lock:{key}")` = **`lock:paper`** 락 아래에서만. `PaperBroker.place()` 의 `clientOrderId` 멱등 체크도 이 락 안에서 수행(기존 주문 있으면 두 번째 체결 없이 반환).
 - **다중 인스턴스 공유·재시작 생존** — AOF/RDB 지속 redis라면 재시작 후 paper 상태 복원.
 
-**`PaperState` 필드**: `cash`(Decimal)·`positions`(symbol→Position)·`orders`(list[PaperOrder])·`realized_pnl`(Decimal)·`counter`(int).
+**`PaperState` 필드**: `cash`(dict[str, Decimal] — 통화→잔고)·`positions`(symbol→Position)·`orders`(list[PaperOrder])·`realized_pnl`(dict[str, Decimal] — 통화→실현손익)·`counter`(int). **`Position`** 은 `quantity`, `avg_price`, `currency`(str) 세 필드를 가진다.
 
-**직렬화 규칙**: 모든 금액/수량(`cash`, `realized_pnl`, `quantity`, `avg_price`, `price`) = Decimal 문자열(`str()`로 쓰기, `to_decimal()`로 읽기). **float 금지**.
+**통화 버킷 분리**: `cash`/`realized_pnl` 는 `{"KRW": ..., "USD": ...}` 형태로 통화별로 완전히 분리된다(FX 환산 없음). BUY 는 해당 통화 버킷에서만 차감; SELL 은 `Position.currency`(매수 시 태그된 통화)를 권위값으로 사용한다. 없는 통화 버킷으로 매수 시 `PaperError("insufficient {currency} cash: ...")`. `buying_power(currency)` 는 해당 통화 버킷 반환(없으면 `Decimal("0")`).
+
+**starting_cash**: `MemoryPaperStore(starting_cash=...)` 와 `RedisPaperStore(..., starting_cash=...)` 는 scalar(`"10000000"` → `{"KRW": ...}`) 또는 dict(`{"KRW": "10000000", "USD": "1000000"}`) 모두 받는다. 내부 정규화 함수 `_as_cash_dict(v)` 가 scalar→KRW dict 변환을 담당.
+
+**직렬화 규칙**: 모든 금액/수량(`cash` dict values, `realized_pnl` dict values, `quantity`, `avg_price`, `price`) = Decimal 문자열(`str()`로 쓰기, `to_decimal()`로 읽기). **float 금지**. `Position.currency` 도 직렬화에 포함.
+
+**레거시 마이그레이션**: `_paper_state_from_dict` 가 구 포맷(scalar `cash`, scalar `realized_pnl`, position 에 `currency` 없음)을 감지해 자동 업그레이드 — scalar → `{"KRW": ...}`, position 통화 없으면 `isalpha()` 심볼모양 폴백(알파→USD, 숫자→KRW).
 
 ### 한계 (현재 단계)
 
@@ -179,4 +185,4 @@ transport는 `stdio`(기본, 단일 클라이언트) 또는 `http`(원격 다중
 
 ## config (env `TOSSINVEST_`)
 
-`mode`·`allow_live`·`client_id`·`client_secret`·`base_url`·`max_order_amount`(1,000,000 KRW)·`daily_order_limit`(5,000,000 KRW)·`max_order_amount_usd`(1,000 USD)·`daily_order_limit_usd`(5,000 USD)·`allow_symbols`/`deny_symbols`(JSON 리스트)·`enforce_market_hours`(True)·`paper_starting_cash`(10,000,000)·`confirmation_ttl_sec`(120)·`live_confirm_min_delay_sec`(0, off — live 환경 권장 5)·`audit_log_path`·**`state_backend`**(`memory`기본/`redis`)·**`redis_url`**(redis 백엔드 필수)·**`transport`**(`stdio`기본/`http`)·**`http_host`**(`127.0.0.1`)·**`http_port`**(`8000`)·**`auth_token`**(http 트랜스포트 필수). 돈 필드(`max_order_amount`·`daily_order_limit`·`max_order_amount_usd`·`daily_order_limit_usd`·`paper_starting_cash`)는 `_no_float` validator 로 float 거부. 사용자용 표는 `pytossinvest-mcp/README.md`.
+`mode`·`allow_live`·`client_id`·`client_secret`·`base_url`·`max_order_amount`(1,000,000 KRW)·`daily_order_limit`(5,000,000 KRW)·`max_order_amount_usd`(1,000 USD)·`daily_order_limit_usd`(5,000 USD)·`allow_symbols`/`deny_symbols`(JSON 리스트)·`enforce_market_hours`(True)·`paper_starting_cash`(**`{"KRW":"10000000"}` — 통화별 JSON dict**; 스칼라는 `{"KRW": …}` 래핑; float·bool 거부)·`confirmation_ttl_sec`(120)·`live_confirm_min_delay_sec`(0, off — live 환경 권장 5)·`audit_log_path`·**`state_backend`**(`memory`기본/`redis`)·**`redis_url`**(redis 백엔드 필수)·**`transport`**(`stdio`기본/`http`)·**`http_host`**(`127.0.0.1`)·**`http_port`**(`8000`)·**`auth_token`**(http 트랜스포트 필수). 돈 필드(`max_order_amount`·`daily_order_limit`·`max_order_amount_usd`·`daily_order_limit_usd`)는 `_no_float` validator 로 float 거부. `paper_starting_cash` 는 `_parse_starting_cash` validator 로 JSON dict·scalar·float·bool 처리(float/bool 거부). 사용자용 표는 `pytossinvest-mcp/README.md`.

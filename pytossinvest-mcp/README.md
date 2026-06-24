@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-Apache--2.0-d22128)
-![tests](https://img.shields.io/badge/tests-166%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-179%20passing-2ea44f)
 ![status](https://img.shields.io/badge/Toss%20API-available-2ea44f)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -134,11 +134,11 @@ docker compose up --build
 | `DENY_SYMBOLS` | `[]` | JSON 리스트. allow 보다 먼저 검사 |
 | `ENFORCE_MARKET_HOURS` | `1` | **live 전용** 장운영시간 게이트 |
 | `LIVE_CONFIRM_MIN_DELAY_SEC` | `0` | **live 전용** preview→실행 최소 간격(초). `0`=off. 자동승인 클라이언트 방어로 `5` 권장 |
-| `PAPER_STARTING_CASH` | `10000000` | paper 포트폴리오 시작 현금 |
+| `PAPER_STARTING_CASH` | `{"KRW":"10000000"}` | paper 시작 현금 (**통화별 JSON dict**). 예 `{"KRW":"10000000","USD":"7000"}`. 스칼라(`10000000`)는 `{"KRW": …}` 로 래핑 |
 | `CONFIRMATION_TTL_SEC` | `120` | preview→place 토큰 유효시간(초) |
 | `AUDIT_LOG_PATH` | `pytossinvest-mcp-audit.log` | 감사 로그(JSONL) 경로 |
 
-> 돈 관련 필드(`MAX_ORDER_AMOUNT`·`DAILY_ORDER_LIMIT`·`MAX_ORDER_AMOUNT_USD`·`DAILY_ORDER_LIMIT_USD`·`PAPER_STARTING_CASH`)는 float 으로 주면 `TypeError` — 문자열/정수만(JSON/Decimal 안전).
+> 돈 관련 필드(`MAX_ORDER_AMOUNT`·`DAILY_ORDER_LIMIT`·`MAX_ORDER_AMOUNT_USD`·`DAILY_ORDER_LIMIT_USD`)는 float 으로 주면 `TypeError` — 문자열/정수만(JSON/Decimal 안전). `PAPER_STARTING_CASH` 는 **통화별 JSON dict** 문자열(`{"KRW":"10000000","USD":"7000"}`) 또는 스칼라 정수/문자열(`10000000`, `{"KRW": …}` 로 자동 래핑). float·bool 은 거부.
 >
 > **통화 판정**: 심볼이 영문자면 USD(예 `AAPL`), 숫자 코드면 KRW(예 `005930`) 한도·임계로 비교합니다(FX 환산 없음 — 안전 한도가 환율/네트워크에 의존하지 않게).
 
@@ -153,7 +153,7 @@ docker compose up --build
 | 툴 | 시그니처 | 설명 |
 |---|---|---|
 | `get_accounts` | `()` | 계좌 목록. paper 면 합성 `PAPER` 계좌 반환 |
-| `get_holdings` | `(symbol=None)` | 보유 포지션. paper 면 현금·실현손익·종목 |
+| `get_holdings` | `(symbol=None)` | 보유 포지션. paper 면 현금·실현손익·종목. **paper `cash`/`realizedPnl` 은 `{통화: 문자열}` dict(KRW/USD 분리), 종목 항목엔 `currency` 포함** |
 | `get_quote` | `(symbols: list)` | 최신가(최대 200종목). **단일 종목이면 호가+체결도 동봉** |
 | `get_candles` | `(symbol, interval, count=100, before=None)` | OHLC 캔들. `interval` 은 `'1m'` 또는 `'1d'` |
 | `get_stock_info` | `(symbols: list)` | 종목 기본정보(최대 200) |
@@ -218,6 +218,7 @@ place_order(confirmation_token) ────────────┘
 
 ## 동작 메모 (이미 겪었거나 설계로 막은 것)
 
+- **paper 현금은 통화별 버킷(KRW/USD 분리, FX 환산 없음)** — `place` 는 `spec.currency` 로 해당 버킷만 차감/입금합니다. 없는 통화로 BUY 시 `PaperError`. `PAPER_STARTING_CASH` 는 통화별 JSON dict(`{"KRW":"10000000","USD":"7000"}`)로 각 버킷을 초기화하며, 스칼라(`10000000`)는 KRW 버킷으로 자동 래핑됩니다. `get_holdings`(paper)의 `cash`·`realizedPnl` 은 `{"KRW": "...", "USD": "..."}` 형태의 통화별 dict 로 반환됩니다.
 - **paper modify/cancel 은 live 전용** — paper 는 즉시체결 모델이라 정정/취소할 미체결 주문이 없습니다. paper 에선 `preview_modify`·`cancel_order` 가 `PaperError` 로 명확히 거부(실제 `409 already-filled` 미러링).
 - **paper MARKET 무가격 체결 금지** — 체결 시점에 참조가(ref price)가 비면 가격 0 으로 조용히 체결되던 버그를 막았습니다. ref price 없으면 `PaperError`(토큰 살려둠 → 재시도 가능). US 금액주문은 `qty = order_amount / fill_price`(Decimal 나눗셈).
 - **장운영시간 US 자정넘김** — 미국장을 KST 로 표기하면 23:30→06:00 처럼 자정을 넘깁니다. `start > end` 면 wrap 윈도우(`now >= start or now < end`)로 처리. 깨진 시간 문자열은 "닫힘"으로 안전 처리. 종목 코드가 영문자면 `US`, 아니면 `KR` 로 캘린더 조회.
@@ -228,7 +229,7 @@ place_order(confirmation_token) ────────────┘
 ## 테스트
 
 ```bash
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests   # 166 passing
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests   # 179 passing
 ```
 
 `FakeClient` + paper 엔진으로 검증 — **라이브 키 불필요, 네트워크 0**. 무거운 로직(가드레일·토큰·paper·market_hours·audit)은 pure 모듈로 분리해 직접 단위테스트하고, `server.py` 는 모드별 **툴 등록 여부**만 검증합니다(MCP 트랜스포트 내부에 의존 안 함).
