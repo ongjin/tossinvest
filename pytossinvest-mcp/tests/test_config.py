@@ -113,3 +113,39 @@ def test_http_allowed_hosts_can_be_set():
     s = Settings(_env_file=None, transport="http", auth_token="secret",
                  http_allowed_hosts=["mcp.example.com", "mcp.example.com:*"])
     assert s.http_allowed_hosts == ["mcp.example.com", "mcp.example.com:*"]
+
+
+def test_paper_starting_cash_default():
+    assert _settings().paper_starting_cash == {"KRW": Decimal("10000000")}
+
+
+def test_paper_starting_cash_dict():
+    s = _settings(paper_starting_cash={"KRW": "10000000", "USD": "7000"})
+    assert s.paper_starting_cash == {"KRW": Decimal("10000000"), "USD": Decimal("7000")}
+
+
+def test_paper_starting_cash_scalar_wraps_krw():
+    s = _settings(paper_starting_cash="5000000")
+    assert s.paper_starting_cash == {"KRW": Decimal("5000000")}
+
+
+def test_paper_starting_cash_rejects_float_value():
+    with pytest.raises(Exception):
+        _settings(paper_starting_cash={"USD": 7000.5})
+
+
+def test_paper_starting_cash_rejects_float_scalar():
+    with pytest.raises(Exception):
+        _settings(paper_starting_cash=1000.5)
+
+
+def test_paper_starting_cash_from_env_json(monkeypatch):
+    monkeypatch.setenv("TOSSINVEST_PAPER_STARTING_CASH", '{"KRW":"10000000","USD":"7000"}')
+    s = Settings(_env_file=None)
+    assert s.paper_starting_cash == {"KRW": Decimal("10000000"), "USD": Decimal("7000")}
+
+
+def test_paper_starting_cash_legacy_scalar_env(monkeypatch):
+    monkeypatch.setenv("TOSSINVEST_PAPER_STARTING_CASH", "5000000")
+    s = Settings(_env_file=None)
+    assert s.paper_starting_cash == {"KRW": Decimal("5000000")}

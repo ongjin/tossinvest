@@ -31,8 +31,8 @@ class Settings(BaseSettings):
     max_order_amount_usd: Decimal = Decimal("1000")
     daily_order_limit_usd: Decimal = Decimal("5000")
 
-    # paper engine
-    paper_starting_cash: Decimal = Decimal("10000000")
+    # paper engine (per-currency cash buckets; scalar is wrapped as {"KRW": ...})
+    paper_starting_cash: dict[str, Decimal] = {"KRW": Decimal("10000000")}
 
     # preview -> confirm window
     confirmation_ttl_sec: int = 120
@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     http_allowed_hosts: list[str] = []
 
     @field_validator(
-        "max_order_amount", "daily_order_limit", "paper_starting_cash",
+        "max_order_amount", "daily_order_limit",
         "max_order_amount_usd", "daily_order_limit_usd", mode="before",
     )
     @classmethod
@@ -64,6 +64,20 @@ class Settings(BaseSettings):
         if isinstance(v, float):
             raise TypeError("money config must be a string or int, never float")
         return v
+
+    @field_validator("paper_starting_cash", mode="before")
+    @classmethod
+    def _paper_cash_dict(cls, v):
+        def _reject_float(x):
+            if isinstance(x, bool) or isinstance(x, float):
+                raise TypeError(
+                    "paper_starting_cash must be string/int per currency, never float/bool")
+        if isinstance(v, dict):
+            for x in v.values():
+                _reject_float(x)
+            return v
+        _reject_float(v)
+        return {"KRW": v}  # legacy scalar -> KRW bucket
 
     @model_validator(mode="after")
     def _live_requires_allow(self):
