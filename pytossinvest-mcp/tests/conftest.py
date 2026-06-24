@@ -104,11 +104,11 @@ def _make_stores(backend):
         from pytossinvest_mcp.redis_stores import RedisTokenStore, RedisSpendStore, RedisPaperStore
         r = fakeredis.FakeStrictRedis(decode_responses=True)
         return (RedisTokenStore(r), RedisSpendStore(r),
-                RedisPaperStore(r, starting_cash="10000000"))
+                RedisPaperStore(r, starting_cash={"KRW": "10000000", "USD": "1000000"}))
     from pytossinvest_mcp.stores import MemoryTokenStore, MemorySpendStore
     from pytossinvest_mcp.paper import MemoryPaperStore
     return (MemoryTokenStore(), MemorySpendStore(),
-            MemoryPaperStore(starting_cash="10000000"))
+            MemoryPaperStore(starting_cash={"KRW": "10000000", "USD": "1000000"}))
 
 
 def make_app(fake_client, tmp_path, *, mode="paper", backend="memory", now_kst=None, **settings_kw):

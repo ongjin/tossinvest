@@ -30,10 +30,11 @@ def test_get_accounts_real_in_read_only(app_factory, fake_client):
 
 def test_get_holdings_paper_uses_broker(app_factory):
     app = app_factory(mode="paper")
-    app.paper.place(symbol="005930", side="BUY", order_type="LIMIT", fill_price="70000", quantity="2")
+    app.paper.place(symbol="005930", side="BUY", order_type="LIMIT",
+                    fill_price="70000", quantity="2", currency="KRW")
     out = T.get_holdings(app)
     assert out["items"][0]["symbol"] == "005930"
-    assert out["cash"] == "9860000"  # 10,000,000 - 140,000
+    assert out["cash"]["KRW"] == "9860000"  # 10,000,000 - 140,000
 
 
 def test_get_holdings_real_in_read_only(app_factory, fake_client):

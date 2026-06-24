@@ -161,7 +161,7 @@ def get_order_readiness(app: AppContext, symbol: str, side: str = "BUY",
                         currency: str = "KRW") -> dict:
     if app.use_paper:
         return {
-            "buyingPower": str(app.paper.buying_power()),
+            "buyingPower": str(app.paper.buying_power(currency)),
             "sellableQuantity": str(app.paper.sellable_quantity(symbol)),
             "commissions": [],
         }
@@ -228,7 +228,8 @@ def place_order(app: AppContext, *, confirmation_token: str) -> dict:
                     qty = str(to_decimal(spec.order_amount) / to_decimal(fill_price))
             order = app.paper.place(
                 symbol=spec.symbol, side=spec.side, order_type=spec.order_type,
-                fill_price=fill_price, quantity=qty, client_order_id=spec.client_order_id,
+                fill_price=fill_price, quantity=qty, currency=spec.currency,
+                client_order_id=spec.client_order_id,
             )
             result = _paper_order_dict(order)
         else:

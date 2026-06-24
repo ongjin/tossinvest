@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from pytossinvest.money import to_decimal
 
-from .paper import PaperState, Position, PaperOrder
+from .paper import PaperState, Position, PaperOrder, _as_cash_dict
 from .safety import OrderSpec
 
 
@@ -125,11 +125,12 @@ class RedisSpendStore:
 
 def _paper_state_to_dict(state: PaperState) -> dict:
     return {
-        "cash": str(state.cash),
-        "realized_pnl": str(state.realized_pnl),
+        "cash": {cur: str(amt) for cur, amt in state.cash.items()},
+        "realized_pnl": {cur: str(amt) for cur, amt in state.realized_pnl.items()},
         "counter": state.counter,
         "positions": {
-            s: {"quantity": str(p.quantity), "avg_price": str(p.avg_price)}
+            s: {"quantity": str(p.quantity), "avg_price": str(p.avg_price),
+                "currency": p.currency}
             for s, p in state.positions.items()
         },
         "orders": [
@@ -143,14 +144,22 @@ def _paper_state_to_dict(state: PaperState) -> dict:
 
 
 def _paper_state_from_dict(d: dict) -> PaperState:
+    raw_cash = d["cash"]
+    cash = ({c: to_decimal(v) for c, v in raw_cash.items()} if isinstance(raw_cash, dict)
+            else {"KRW": to_decimal(raw_cash)})  # legacy scalar -> KRW
+    raw_pnl = d.get("realized_pnl", {})
+    realized = ({c: to_decimal(v) for c, v in raw_pnl.items()} if isinstance(raw_pnl, dict)
+                else {"KRW": to_decimal(raw_pnl)})
+    positions = {}
+    for s, p in d["positions"].items():
+        cur = p.get("currency") or ("USD" if s.isalpha() else "KRW")  # legacy infer
+        positions[s] = Position(quantity=to_decimal(p["quantity"]),
+                                avg_price=to_decimal(p["avg_price"]), currency=cur)
     return PaperState(
-        cash=to_decimal(d["cash"]),
-        realized_pnl=to_decimal(d["realized_pnl"]),
+        cash=cash,
+        realized_pnl=realized,
         counter=d["counter"],
-        positions={
-            s: Position(quantity=to_decimal(p["quantity"]), avg_price=to_decimal(p["avg_price"]))
-            for s, p in d["positions"].items()
-        },
+        positions=positions,
         orders=[
             PaperOrder(
                 order_id=o["order_id"], symbol=o["symbol"], side=o["side"],
@@ -167,7 +176,7 @@ class RedisPaperStore:
     def __init__(self, client, *, starting_cash, key: str = "paper", lock_timeout: float = 5.0):
         self._r = client
         self._key = key
-        self._starting = to_decimal(starting_cash)
+        self._starting = _as_cash_dict(starting_cash)
         self._lock_timeout = lock_timeout
 
     def lock(self):
@@ -177,8 +186,9 @@ class RedisPaperStore:
     def load(self) -> PaperState:
         raw = self._r.get(self._key)
         if raw is None:
-            return PaperState(cash=self._starting, positions={}, orders=[],
-                              realized_pnl=Decimal("0"), counter=0)
+            return PaperState(cash=dict(self._starting), positions={}, orders=[],
+                              realized_pnl={cur: Decimal("0") for cur in self._starting},
+                              counter=0)
         return _paper_state_from_dict(json.loads(raw))
 
     def save(self, state: PaperState) -> None:
