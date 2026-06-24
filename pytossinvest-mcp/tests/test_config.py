@@ -130,12 +130,12 @@ def test_paper_starting_cash_scalar_wraps_krw():
 
 
 def test_paper_starting_cash_rejects_float_value():
-    with pytest.raises(Exception):
+    with pytest.raises(TypeError):
         _settings(paper_starting_cash={"USD": 7000.5})
 
 
 def test_paper_starting_cash_rejects_float_scalar():
-    with pytest.raises(Exception):
+    with pytest.raises(TypeError):
         _settings(paper_starting_cash=1000.5)
 
 

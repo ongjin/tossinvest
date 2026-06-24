@@ -106,14 +106,14 @@ def test_legacy_scalar_state_migrates_on_load(r):
 
 
 def test_round_trip_serialization(r):
-    state = PaperState_with_two_currencies()
+    state = _make_two_currency_state()
     d = _paper_state_to_dict(state)
     back = _paper_state_from_dict(d)
     assert back.cash == {"KRW": Decimal("100"), "USD": Decimal("50")}
     assert back.positions["SOXX"].currency == "USD"
 
 
-def PaperState_with_two_currencies():
+def _make_two_currency_state():
     from pytossinvest_mcp.paper import PaperState
     return PaperState(
         cash={"KRW": Decimal("100"), "USD": Decimal("50")},
