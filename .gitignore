@@ -1,2 +1,5 @@
 .venv/
 __pycache__/
+
+# local Claude Code MCP config (holds bearer token — never commit)
+.mcp.json
