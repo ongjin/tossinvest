@@ -18,7 +18,7 @@ classifiers = [
 ]
 dependencies = [
     "pytossinvest",
-    "mcp>=1.12",
+    "mcp>=1.12,<2",
     "pydantic-settings>=2",
 ]
 
