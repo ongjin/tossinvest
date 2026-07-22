@@ -7,11 +7,11 @@ def test_version_exposed():
     assert pytossinvest_mcp.__version__ == "0.0.1"
 
 
-def test_fastmcp_harness_works():
+def test_mcpserver_harness_works():
     """Prove we can register a tool and read it back via list_tools() in-process."""
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server import MCPServer
 
-    mcp = FastMCP("harness-check")
+    mcp = MCPServer("harness-check")
 
     @mcp.tool(name="ping", description="returns pong")
     def ping() -> dict:

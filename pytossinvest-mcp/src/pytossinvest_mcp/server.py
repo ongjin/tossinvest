@@ -4,7 +4,7 @@ import time as _time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 
 from .audit import AuditLog
 from .config import Settings
@@ -53,33 +53,37 @@ def build_app_context(settings: Settings, *, client) -> AppContext:
     )
 
 
-def build_server(settings: Settings, *, client) -> FastMCP:
+def build_server(settings: Settings, *, client) -> MCPServer:
     app = build_app_context(settings, client=client)
-    kwargs = {"stateless_http": settings.transport == "http"}
-    if settings.transport == "http":
-        # The bearer middleware (http.py) is the entire auth surface; the deploy host is
-        # operator/proxy-controlled and unknown at build time, so FastMCP's localhost-only
-        # DNS-rebinding default would 421 every real remote client. Auth = bearer, not Host.
-        # Operators who know their host can opt into pinning via http_allowed_hosts
-        # (defense-in-depth: re-enables the Host check against the allowlist).
-        from mcp.server.transport_security import TransportSecuritySettings
-        if settings.http_allowed_hosts:
-            kwargs["transport_security"] = TransportSecuritySettings(
-                enable_dns_rebinding_protection=True,
-                allowed_hosts=settings.http_allowed_hosts,
-            )
-        else:
-            kwargs["transport_security"] = TransportSecuritySettings(
-                enable_dns_rebinding_protection=False
-            )
-    mcp = FastMCP("pytossinvest-mcp", **kwargs)
+    mcp = MCPServer("pytossinvest-mcp")
     _register_reads(mcp, app)
     if settings.mode != "read_only":
         _register_writes(mcp, app)
     return mcp
 
 
-def _register_reads(mcp: FastMCP, app: AppContext) -> None:
+def transport_kwargs(settings: Settings) -> dict:
+    """Streamable-HTTP transport options. SDK v2 moved these off the server object and
+    onto streamable_http_app(), so they are computed here and applied at mount time."""
+    # The bearer middleware (http.py) is the entire auth surface; the deploy host is
+    # operator/proxy-controlled and unknown at build time, so the SDK's localhost-only
+    # DNS-rebinding default would 421 every real remote client. Auth = bearer, not Host.
+    # Operators who know their host can opt into pinning via http_allowed_hosts
+    # (defense-in-depth: re-enables the Host check against the allowlist).
+    from mcp.server.transport_security import TransportSecuritySettings
+    if settings.http_allowed_hosts:
+        security = TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=settings.http_allowed_hosts,
+        )
+    else:
+        security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    # v2 defaults stateless_http to False even though the 2026-07-28 core is sessionless;
+    # this server has always run sessionless over HTTP, so opt in explicitly.
+    return {"stateless_http": True, "transport_security": security}
+
+
+def _register_reads(mcp: MCPServer, app: AppContext) -> None:
     @mcp.tool(name="get_accounts",
               description="List brokerage accounts. Paper mode returns a synthetic PAPER account.")
     def get_accounts() -> dict:
@@ -122,7 +126,7 @@ def _register_reads(mcp: FastMCP, app: AppContext) -> None:
         return T.get_order(app, order_id)
 
 
-def _register_writes(mcp: FastMCP, app: AppContext) -> None:
+def _register_writes(mcp: MCPServer, app: AppContext) -> None:
     @mcp.tool(name="get_order_readiness",
               description="Buying power, sellable quantity, and commissions before ordering.")
     def get_order_readiness(symbol: str, side: str = "BUY", currency: str = "KRW") -> dict:
@@ -172,7 +176,8 @@ def _register_writes(mcp: FastMCP, app: AppContext) -> None:
 def run_server(settings: Settings, mcp) -> None:
     if settings.transport == "http":
         from .http import build_http_app, serve_http
-        app = build_http_app(mcp, auth_token=settings.auth_token)
+        app = build_http_app(mcp, auth_token=settings.auth_token,
+                             **transport_kwargs(settings))
         serve_http(app, host=settings.http_host, port=settings.http_port)
     else:
         mcp.run()  # stdio transport (default) for MCP clients like Claude Desktop

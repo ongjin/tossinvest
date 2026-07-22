@@ -27,9 +27,13 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-def build_http_app(mcp, *, auth_token: str) -> Starlette:
-    """Wrap the FastMCP Streamable-HTTP ASGI app (mounted at /mcp) with bearer auth."""
-    app = mcp.streamable_http_app()
+def build_http_app(mcp, *, auth_token: str, **transport) -> Starlette:
+    """Wrap the Streamable-HTTP ASGI app (mounted at /mcp) with bearer auth.
+
+    `transport` carries the options SDK v2 moved from the server constructor onto
+    streamable_http_app() (stateless_http, transport_security) — see server.transport_kwargs.
+    """
+    app = mcp.streamable_http_app(**transport)
     app.add_middleware(BearerAuthMiddleware, token=auth_token)
     return app
 

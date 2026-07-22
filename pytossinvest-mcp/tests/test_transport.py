@@ -3,7 +3,7 @@ from pytossinvest_mcp.server import run_server
 
 
 def test_run_server_http_serves_auth_wrapped_app(monkeypatch):
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server import MCPServer
     import pytossinvest_mcp.http as http_mod
 
     captured = {}
@@ -15,7 +15,7 @@ def test_run_server_http_serves_auth_wrapped_app(monkeypatch):
 
     monkeypatch.setattr(http_mod, "serve_http", fake_serve)
 
-    mcp = FastMCP("t", stateless_http=True)
+    mcp = MCPServer("t")
     settings = Settings(_env_file=None, transport="http", auth_token="secret",
                         http_host="0.0.0.0", http_port=9999, mode="read_only")
     run_server(settings, mcp)
