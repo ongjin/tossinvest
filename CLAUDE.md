@@ -14,7 +14,7 @@
 
 - **Runtime**: Python 3.12, **uv 워크스페이스** 모노레포 (hatchling build)
 - **`pytossinvest`** (SDK, **MIT**): `httpx`(sync) + `pydantic` v2. 토큰매니저·그룹별 레이트리미터·decimal-safe money·code 기반 에러·17 엔드포인트.
-- **`pytossinvest-mcp`** (MCP 서버, **Apache-2.0**, SDK 의존): `mcp`(FastMCP, stdio) + `pydantic-settings`. 안전모델(모드·가드레일·preview/confirm·멱등성·감사로그) + 14 툴.
+- **`pytossinvest-mcp`** (MCP 서버, **Apache-2.0**, SDK 의존): `mcp>=2.0.0,<3`(SDK v2 `MCPServer` — 2026-07-28 스펙, stdio) + `pydantic-settings`. 안전모델(모드·가드레일·preview/confirm·멱등성·감사로그) + 14 툴.
 - **테스트**: `pytest`. SDK 는 `respx` 로 httpx mock, MCP 는 `FakeClient` + paper 엔진 — **라이브 키 불필요, 네트워크 0**.
 
 ## Project Structure
@@ -73,7 +73,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 - **`fakeredis[lua]` 필수** — redis-py `Lock.release()`는 내부적으로 EVALSHA(Lua)를 사용. fakeredis 의 lua 서브패키지가 없으면 Lock.release()에서 `ResponseError` 발생. 실제 Redis 에는 Lua가 기본 내장.
 - **redis 백엔드에서 `restore_spend`/`seed` 는 no-op** — redis counter 가 진실의 원천(AOF). memory 백엔드만 부팅 시 감사 리플레이로 복원. redis 백엔드에서 감사 파일을 지워도 counter는 유지된다.
 - **PaperStore 심 — memory|redis + 통화별 현금 버킷** — `PaperBroker`는 `PaperStore` 인터페이스(`lock()/load()/save()`)를 통해 상태를 읽고 쓴다. `MemoryPaperStore`(기본, 인스턴스 로컬·재시작 휘발) / `RedisPaperStore`(redis 백엔드 선택 시, 단일 JSON 키 `paper` + `lock:paper` 분산락, 다중 인스턴스 공유·재시작 생존). `PaperState.cash` 와 `realized_pnl` 은 **`dict[str, Decimal]`(통화→금액)** — 통화 버킷 완전 분리, FX 환산 없음. `Position` 은 `currency` 필드를 포함. `place(currency=…)` 는 해당 버킷만 차감 — 없는 통화로 BUY 시 `PaperError("insufficient {currency} cash: …")`. `buying_power(currency)` 는 해당 버킷 반환(없으면 0). `starting_cash` 는 scalar(`"10000000"` → `{"KRW": …}`) 또는 dict 모두 허용 — `_as_cash_dict()` 정규화. 레거시 redis 키(scalar cash·position 無 currency)는 로드 시 자동 마이그레이션. `place()` 는 `clientOrderId` 멱등 — 락 안에서 중복 체결 방지(기존 주문 반환). transport는 `stdio`(기본) 또는 `http`(원격).
-- **http 트랜스포트 함정** — `TOSSINVEST_TRANSPORT=http` 로 부팅 시 `TOSSINVEST_AUTH_TOKEN` 미설정이면 config validator 가 `ValueError`로 거부(live/redis 이중게이트와 동형 삼중 fail-closed). bearer 는 `hmac.compare_digest` 상수시간 비교(타이밍 공격 방지). MCP 엔드포인트는 `/mcp`(Streamable HTTP, `stateless_http=True`). uvicorn 은 옵션 `[http]` extra — `serve_http` 안에서만 import(stdio 설치·테스트 스위트는 uvicorn 불필요). 단일테넌트 — 토큰은 엔드포인트 인증일 뿐, Redis 미저장·Toss 자격증명 아님. **DNS-rebinding**: `build_server` 는 http 일 때 FastMCP 의 localhost-only 자동보호(비-localhost `Host`→421)를 끈다(bearer 가 인증면, 배포 host 는 프록시 제어) — 단 `TOSSINVEST_HTTP_ALLOWED_HOSTS`(JSON 리스트, 기본 빈값)를 주면 그 목록으로 Host 핀닝 재활성(심화방어, 미허용 Host→421). stdio 는 인자 미전달로 무변경.
+- **http 트랜스포트 함정** — `TOSSINVEST_TRANSPORT=http` 로 부팅 시 `TOSSINVEST_AUTH_TOKEN` 미설정이면 config validator 가 `ValueError`로 거부(live/redis 이중게이트와 동형 삼중 fail-closed). bearer 는 `hmac.compare_digest` 상수시간 비교(타이밍 공격 방지). MCP 엔드포인트는 `/mcp`(Streamable HTTP, `stateless_http=True` — **SDK v2 는 이걸 생성자가 아니라 `streamable_http_app()` 인자로 받는다**, `server.transport_kwargs(settings)` 가 단일 seam). uvicorn 은 옵션 `[http]` extra — `serve_http` 안에서만 import(stdio 설치·테스트 스위트는 uvicorn 불필요). 단일테넌트 — 토큰은 엔드포인트 인증일 뿐, Redis 미저장·Toss 자격증명 아님. **DNS-rebinding**: `transport_kwargs` 는 http 일 때 SDK 의 localhost-only 자동보호(비-localhost `Host`→421)를 끈다(bearer 가 인증면, 배포 host 는 프록시 제어) — 단 `TOSSINVEST_HTTP_ALLOWED_HOSTS`(JSON 리스트, 기본 빈값)를 주면 그 목록으로 Host 핀닝 재활성(심화방어, 미허용 Host→421). stdio 는 인자 미전달로 무변경.
 
 ## 추가 문서 (docs/)
 

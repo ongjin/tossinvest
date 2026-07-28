@@ -11,6 +11,7 @@ from .config import Settings
 from .paper import PaperBroker
 from .safety import SafetyManager
 from .tools import AppContext
+from . import __version__
 from . import tools as T
 
 _KST = ZoneInfo("Asia/Seoul")
@@ -55,7 +56,7 @@ def build_app_context(settings: Settings, *, client) -> AppContext:
 
 def build_server(settings: Settings, *, client, cache_hints=None) -> MCPServer:
     app = build_app_context(settings, client=client)
-    mcp = MCPServer("pytossinvest-mcp", cache_hints=cache_hints)
+    mcp = MCPServer("pytossinvest-mcp", version=__version__, cache_hints=cache_hints)
     _register_reads(mcp, app)
     if settings.mode != "read_only":
         _register_writes(mcp, app)

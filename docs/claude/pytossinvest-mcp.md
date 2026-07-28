@@ -8,7 +8,7 @@ LLM(Claude Desktop/Cursor 등)에 토스 계좌 읽기/거래를 **안전하게*
 
 - 위치: `pytossinvest-mcp/src/pytossinvest_mcp/`
 - 테스트: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests` (FakeClient + paper 엔진, 179개, **라이브 키 불필요**)
-- 의존: `mcp`(FastMCP), `pydantic-settings`, `pytossinvest`. 옵션 extra: `redis = ["redis>=5"]`(HA 백엔드), `http = ["uvicorn>=0.30"]`(http 트랜스포트). dev extra: `fakeredis[lua]>=2`(테스트).
+- 의존: `mcp>=2.0.0,<3`(SDK v2 `MCPServer`), `pydantic-settings`(직접 의존 — v2 부터 `mcp` 가 안 끌고 옴), `pytossinvest`. 옵션 extra: `redis = ["redis>=5"]`(HA 백엔드), `http = ["uvicorn>=0.30"]`(http 트랜스포트). dev extra: `fakeredis[lua]>=2`(테스트).
 
 ## 🔒 안전 불변식 (이 프로젝트의 핵심 — 절대 깨지 말 것)
 
@@ -17,7 +17,7 @@ LLM(Claude Desktop/Cursor 등)에 토스 계좌 읽기/거래를 **안전하게*
 ## 레이어 (의존 방향: 위 → 아래)
 
 ```
-server.py     ← FastMCP build_server(stateless_http 분기), run_server(stdio|http 분기), main()
+server.py     ← MCPServer build_server(version 명시) + transport_kwargs(전송 옵션 seam), run_server(stdio|http 분기), main()
 http.py       ← ASGI 조립 + bearer 미들웨어 (BearerAuthMiddleware / build_http_app / serve_http)
 tools.py      ← AppContext + 툴 함수 fn(app, ...). 라우팅(paper vs real). 테스트는 이 함수 직접 호출
   ├ safety.py       가드레일 + preview/confirm 토큰 + 멱등성 (pure, 시계 주입)
@@ -46,7 +46,7 @@ tools.py      ← AppContext + 툴 함수 fn(app, ...). 라우팅(paper vs real)
 | `stdio`(기본) | `mcp.run()` — Claude Desktop/Cursor 등 MCP 클라이언트용, 무변경 | `run_server` stdio 분기 |
 | `http` | Starlette ASGI `/mcp`(Streamable HTTP) + `BearerAuthMiddleware` + uvicorn | `run_server` http 분기 |
 
-- **`build_server`**: `stateless_http=(settings.transport == "http")` 로 FastMCP 초기화. stdio 일 때는 `stateless_http=False`.
+- **`build_server`**: `MCPServer("pytossinvest-mcp", version=__version__, cache_hints=...)` 초기화 — **v2 는 전송 옵션(`stateless_http`·`transport_security`)을 생성자가 아니라 `streamable_http_app()` 인자로 받으므로** 서버 객체에는 안 실린다. `version=` 미지정 시 빈 문자열이 나가므로 명시(v1 은 그 자리에 SDK 버전이 새어 들어갔었다). 전송 옵션은 **`transport_kwargs(settings)`** 단일 seam — http 면 `{"stateless_http": True, "transport_security": ...}`, `http.py`·bench·테스트가 같은 걸 쓴다(안 넘기면 조용히 SDK 기본값 = 세션 모드 + localhost-only 보호로 떨어지는 게 v2 의 함정).
 - **`run_server(settings, mcp)`**: http 면 `build_http_app(mcp, auth_token=settings.auth_token)` → `serve_http(app, host, port)`. stdio 면 `mcp.run()`.
 - **`http.py`**: `BearerAuthMiddleware(BaseHTTPMiddleware)` — `hmac.compare_digest` 상수시간 bearer 검증, 실패 시 401. `build_http_app(mcp, *, auth_token)` — `mcp.streamable_http_app()` 에 미들웨어 추가 후 Starlette 앱 반환. `serve_http(app, *, host, port)` — uvicorn runner(함수 내부에서만 `import uvicorn` — `[http]` extra).
 - **직교성**: transport 축은 `MODE`(read_only/paper/live) 및 `STATE_BACKEND`(memory/redis)와 독립. 어떤 조합이든 동작. 다중 인스턴스 HA = `http` + `redis` 백엔드 조합 권장.
@@ -173,7 +173,7 @@ transport는 `stdio`(기본, 단일 클라이언트) 또는 `http`(원격 다중
 - **부팅 복원(UTC ts → KST 날짜)** — `restore_spend` 는 감사 이벤트의 `ts`(UTC ISO) 를 `datetime.fromisoformat(ts).astimezone(_KST).date()` 로 변환해 오늘 KST 날짜와 비교. `placed` 와 `modified` 이벤트의 `notional`·`currency` 를 합산한 뒤 통화별 0-하한 적용. 파싱 실패·dict 가 아닌 이벤트·`notional`/`ts` 필드 누락은 건너뜀(손상 감사 파일 있어도 서버 부팅 불가 없음). 감사 파일을 지우면 당일 누적도 0으로 리셋된다(주의).
 - **`invalid-order-value` (양수 검증)** — `build_spec` 에서 `quantity`·`price`·`order_amount` 가 전달된 경우 `<= 0` 이면 `GuardrailError("invalid-order-value")`. notional 이 음수여서 상한 게이트를 조용히 통과하던 구멍 차단.
 - **http 트랜스포트 인증** — `TOSSINVEST_TRANSPORT=http` 로 부팅 시 `TOSSINVEST_AUTH_TOKEN` 이 비어있으면 `_http_requires_auth_token` model_validator 가 `ValueError` 발생(live/redis 와 동형 삼중 fail-closed). bearer 는 `hmac.compare_digest` 상수시간 비교 — 타이밍 공격 방지. 토큰은 엔드포인트 인증 전용, 단일 테넌트 — Redis 미저장, Toss API 자격증명 아님. `serve_http` 는 `uvicorn` 을 함수 내부에서만 import → stdio 설치 및 테스트 스위트는 uvicorn 없이 동작.
-- **http 모드 DNS 리바인딩 보호 비활성화** — `build_server` 는 `transport=="http"` 일 때 `FastMCP(..., transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False))` 를 전달한다. FastMCP 기본값은 host가 localhost 계열이면 DNS 리바인딩 보호를 자동 활성화해 비-localhost `Host` 헤더를 **421**으로 거부하는데, 원격 배포(Docker/리버스프록시)에서는 `mcp.example.com` 등 외부 호스트 헤더를 쓰므로 모든 요청이 421 처리된다. 인증 표면은 bearer 미들웨어(`BearerAuthMiddleware`)이고 배포 host 는 운영자/프록시가 제어하므로 Host 헤더 기반 방어가 불필요 — 의도적으로 비활성화. **stdio 경로는 이 인자를 전달하지 않아 기존 그대로.** 단, 운영자가 자기 host 를 알면 `TOSSINVEST_HTTP_ALLOWED_HOSTS`(JSON 리스트, 기본 `[]`)로 **opt-in Host 핀닝**을 켤 수 있다 — 비면 위처럼 보호 off, 비어있지 않으면 `enable_dns_rebinding_protection=True` + `allowed_hosts=<목록>` 으로 전달해 목록에 없는 `Host`→421(심화방어). 매칭은 정확일치 + `host:*` 포트 와일드카드(mcp `TransportSecurityMiddleware`). 빈 문자열 env 값은 JSON 파싱 실패로 부팅 거부되므로 deploy 템플릿은 해당 env 를 주석 처리(설정 시에만 비-빈 JSON 리스트).
+- **http 모드 DNS 리바인딩 보호 비활성화** — `transport_kwargs(settings)` 가 `transport=="http"` 일 때 `transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False)` 를 만들어 **`streamable_http_app()` 호출부**(`build_http_app` 경유)에 전달한다(v2 는 이 인자를 서버 생성자가 아니라 앱 빌더가 받는다 — 안 넘기면 조용히 SDK 기본값으로 폴백하는 게 함정). SDK 기본값은 host가 localhost 계열이면 DNS 리바인딩 보호를 자동 활성화해 비-localhost `Host` 헤더를 **421**으로 거부하는데, 원격 배포(Docker/리버스프록시)에서는 `mcp.example.com` 등 외부 호스트 헤더를 쓰므로 모든 요청이 421 처리된다. 인증 표면은 bearer 미들웨어(`BearerAuthMiddleware`)이고 배포 host 는 운영자/프록시가 제어하므로 Host 헤더 기반 방어가 불필요 — 의도적으로 비활성화. **stdio 경로는 이 인자를 전달하지 않아 기존 그대로.** 단, 운영자가 자기 host 를 알면 `TOSSINVEST_HTTP_ALLOWED_HOSTS`(JSON 리스트, 기본 `[]`)로 **opt-in Host 핀닝**을 켤 수 있다 — 비면 위처럼 보호 off, 비어있지 않으면 `enable_dns_rebinding_protection=True` + `allowed_hosts=<목록>` 으로 전달해 목록에 없는 `Host`→421(심화방어). 매칭은 정확일치 + `host:*` 포트 와일드카드(mcp `TransportSecurityMiddleware`). 빈 문자열 env 값은 JSON 파싱 실패로 부팅 거부되므로 deploy 템플릿은 해당 env 를 주석 처리(설정 시에만 비-빈 JSON 리스트).
 
 ## 새 툴 추가 절차
 
