@@ -34,9 +34,9 @@ def test_bearer_allows_correct_token():
 
 
 def test_build_http_app_mounts_auth_on_real_mcp_endpoint():
-    from mcp.server.fastmcp import FastMCP
-    mcp = FastMCP("test", stateless_http=True)
-    app = build_http_app(mcp, auth_token="secret")
+    from mcp.server import MCPServer
+    mcp = MCPServer("test")
+    app = build_http_app(mcp, auth_token="secret", stateless_http=True)
     client = TestClient(app)
     # the streamable endpoint is /mcp; without a bearer the middleware 401s
     # BEFORE any MCP handling, proving the guard wraps the real app.
@@ -46,13 +46,13 @@ def test_build_http_app_mounts_auth_on_real_mcp_endpoint():
 def test_http_accepts_non_localhost_host(tmp_path):
     from conftest import FakeClient
     from pytossinvest_mcp.config import Settings
-    from pytossinvest_mcp.server import build_server
+    from pytossinvest_mcp.server import build_server, transport_kwargs
     from pytossinvest_mcp.http import build_http_app
 
     settings = Settings(_env_file=None, transport="http", auth_token="secret",
                         mode="read_only", audit_log_path=str(tmp_path / "audit.log"))
     mcp = build_server(settings, client=FakeClient())
-    app = build_http_app(mcp, auth_token="secret")
+    app = build_http_app(mcp, auth_token="secret", **transport_kwargs(settings))
 
     # A real MCP initialize, authorized, with a NON-localhost Host (what a remote client / proxy sends).
     # Pre-fix: FastMCP's localhost-only DNS-rebinding default 421s this request.
@@ -73,14 +73,14 @@ def test_http_accepts_non_localhost_host(tmp_path):
 def _build_app_allowed_hosts(tmp_path, allowed):
     from conftest import FakeClient
     from pytossinvest_mcp.config import Settings
-    from pytossinvest_mcp.server import build_server
+    from pytossinvest_mcp.server import build_server, transport_kwargs
     from pytossinvest_mcp.http import build_http_app
 
     settings = Settings(_env_file=None, transport="http", auth_token="secret",
                         mode="read_only", http_allowed_hosts=allowed,
                         audit_log_path=str(tmp_path / "audit.log"))
     mcp = build_server(settings, client=FakeClient())
-    return build_http_app(mcp, auth_token="secret")
+    return build_http_app(mcp, auth_token="secret", **transport_kwargs(settings))
 
 
 def _initialize(client, host):
