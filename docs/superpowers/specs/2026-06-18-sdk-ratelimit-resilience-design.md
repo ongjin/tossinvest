@@ -18,7 +18,7 @@
 
 ## 2. 외부 API 사실 (source of truth)
 
-`docs/claude/tossinvest-open-api.md` §3 기준:
+`docs/wiki/tossinvest-open-api.md` §3 기준:
 - 응답 헤더(정상·429 공통): `X-RateLimit-Limit`(현재 burst capacity) · `X-RateLimit-Remaining`(남은 토큰, 429 시 0) · `X-RateLimit-Reset`(토큰 1개 재충전 예상 초) · `Retry-After`(429 에만, 초).
 - 429 대응 공식 3원칙: (1) `Retry-After` 대기 후 재시도, (2) 지수 백오프(1→2→4…)+jitter, (3) `Remaining` 낮으면 429 전에 선제 감속. 한도 수치는 공지 없이 바뀌므로 **표 숫자 하드코딩 금지**.
 
@@ -106,4 +106,4 @@
 | `pytossinvest/src/pytossinvest/client.py` | 생성자 `max_retries`/`retry_max_wait`/`rng`; `_sync_bucket_from_headers`; group별 헤더-수신 플래그 + `_gate` 헤더-우선 분기; `_request` 429 재시도 루프 + 응답 후 헤더 동기화 |
 | `pytossinvest/src/pytossinvest/ratelimit.py` | `backoff_wait(attempt, retry_after, *, base, cap, rng)` 순수 함수 |
 | `pytossinvest/tests/test_client_core.py` (+ ratelimit 테스트 파일) | B3/B4 테스트, 기존 429 테스트 갱신 |
-| `docs/claude/pytossinvest-sdk.md`, `CLAUDE.md`(SDK 규약), `pytossinvest/README.md` | 레이트리밋 동적동기화·자동 retry 구현됨으로 갱신(v0.0.1 한계 문구 제거) |
+| `docs/wiki/pytossinvest-sdk.md`, `AGENTS.md`(SDK 규약), `pytossinvest/README.md` | 레이트리밋 동적동기화·자동 retry 구현됨으로 갱신(v0.0.1 한계 문구 제거) |

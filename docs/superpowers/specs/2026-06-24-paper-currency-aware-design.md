@@ -119,6 +119,6 @@ All amounts are strings (JSON/Decimal-safe). This is a **breaking change** to th
 
 ## Docs to self-update (same session, no commit)
 
-- `CLAUDE.md`: `PAPER_STARTING_CASH` now a per-currency JSON dict; paper is currency-aware; update/remove the "통화혼합" 함정 entry.
-- `docs/claude/pytossinvest-mcp.md`: paper section (per-currency cash, holdings shape, place currency injection).
+- `AGENTS.md`: `PAPER_STARTING_CASH` now a per-currency JSON dict; paper is currency-aware; update/remove the "통화혼합" 함정 entry.
+- `docs/wiki/pytossinvest-mcp.md`: paper section (per-currency cash, holdings shape, place currency injection).
 - `pytossinvest-mcp/README.md`: config table `PAPER_STARTING_CASH`.

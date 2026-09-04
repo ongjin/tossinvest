@@ -757,8 +757,8 @@ scalar is wrapped as {KRW: ...}. Floats/bools rejected per the money rules."
 ### Task 3: Documentation self-update
 
 **Files:**
-- Modify: `CLAUDE.md`
-- Modify: `docs/claude/pytossinvest-mcp.md`
+- Modify: `AGENTS.md`
+- Modify: `docs/wiki/pytossinvest-mcp.md`
 - Modify: `pytossinvest-mcp/README.md`
 
 **Interfaces:** none (docs only). No tests.
@@ -771,14 +771,14 @@ scalar is wrapped as {KRW: ...}. Floats/bools rejected per the money rules."
 
 Also, in the paper section, note that paper cash/buying-power/realized-pnl are **per currency** (KRW/USD 분리, FX 환산 없음) and that `get_holdings` (paper) returns `cash`/`realizedPnl` as `{통화: 문자열}` and items carry `currency`.
 
-- [ ] **Step 2: Update `docs/claude/pytossinvest-mcp.md`** paper section: paper engine is currency-aware — `PaperState.cash`/`realized_pnl` are `{currency: Decimal}`, `Position` has `currency`, `place()` requires `currency` (injected from `spec.currency` in `tools.place_order`), `buying_power(currency)`, `holdings()` returns per-currency cash. Redis serialization carries currency and migrates legacy scalar state (scalar cash → KRW, position currency inferred by `isalpha()`).
+- [ ] **Step 2: Update `docs/wiki/pytossinvest-mcp.md`** paper section: paper engine is currency-aware — `PaperState.cash`/`realized_pnl` are `{currency: Decimal}`, `Position` has `currency`, `place()` requires `currency` (injected from `spec.currency` in `tools.place_order`), `buying_power(currency)`, `holdings()` returns per-currency cash. Redis serialization carries currency and migrates legacy scalar state (scalar cash → KRW, position currency inferred by `isalpha()`).
 
-- [ ] **Step 3: Update `CLAUDE.md`.** In the MCP conventions/함정 area, replace the previous single-pool wording with: paper 현금은 **통화별 버킷**(KRW/USD 분리, FX 환산 없음) — `place` 는 `spec.currency` 로 해당 버킷만 차감/입금, `PAPER_STARTING_CASH` 는 통화별 JSON dict(스칼라는 `{"KRW":…}` 래핑). `get_holdings`(paper) 의 `cash`/`realizedPnl` 은 통화별 dict. (이전의 "현금풀 통화 무구분" 설명은 제거/수정.)
+- [ ] **Step 3: Update `AGENTS.md`.** In the MCP conventions/함정 area, replace the previous single-pool wording with: paper 현금은 **통화별 버킷**(KRW/USD 분리, FX 환산 없음) — `place` 는 `spec.currency` 로 해당 버킷만 차감/입금, `PAPER_STARTING_CASH` 는 통화별 JSON dict(스칼라는 `{"KRW":…}` 래핑). `get_holdings`(paper) 의 `cash`/`realizedPnl` 은 통화별 dict. (이전의 "현금풀 통화 무구분" 설명은 제거/수정.)
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add CLAUDE.md docs/claude/pytossinvest-mcp.md pytossinvest-mcp/README.md
+git add AGENTS.md docs/wiki/pytossinvest-mcp.md pytossinvest-mcp/README.md
 git commit -m "docs: per-currency paper cash (config, holdings shape, behavior)"
 ```
 

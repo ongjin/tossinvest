@@ -12,7 +12,7 @@
 
 - **Money/quantity are NEVER float** — strings/`Decimal` end-to-end. Redis counters stored as **decimal strings**; arithmetic in Python `Decimal` under a lock. Redis `INCR`/`INCRBYFLOAT` are forbidden for money (not decimal-safe). (project CRITICAL RULE)
 - **SDK public API must not change** — this plan touches `pytossinvest-mcp` only; `pytossinvest` is untouched.
-- **place_order/modify safety invariant** — execution path goes through `check_guardrails`; confirmation tokens issued only by preview after guardrails pass. This plan *refines* "finalize-on-success" into "reserve-on-attempt / release-on-failure / commit-on-success" (equivalent cap enforcement, distributed-safe). Update CLAUDE.md invariant wording in the final task.
+- **place_order/modify safety invariant** — execution path goes through `check_guardrails`; confirmation tokens issued only by preview after guardrails pass. This plan *refines* "finalize-on-success" into "reserve-on-attempt / release-on-failure / commit-on-success" (equivalent cap enforcement, distributed-safe). Update AGENTS.md invariant wording in the final task.
 - **Tests: zero network, no live keys** — Redis path tested via `fakeredis`. MCP tools tested via `FakeClient` + paper engine.
 - **Test imports** — in tests use `from conftest import ...` (pytest puts `tests/` on `sys.path`), never `from tests.conftest`.
 - **No AI-authorship markers** anywhere (commit messages, comments, docs). Public OSS repo.
@@ -1197,7 +1197,7 @@ git commit -m "test(mcp): backend parity memory vs fakeredis"
 
 **Files:**
 - Modify: `pytossinvest-mcp/pyproject.toml`
-- Modify: `CLAUDE.md`, `docs/claude/pytossinvest-mcp.md`
+- Modify: `AGENTS.md`, `docs/wiki/pytossinvest-mcp.md`
 
 **Interfaces:**
 - Produces: optional extra `redis = ["redis>=5"]`; `dev` extra gains `fakeredis>=2`; `pytest` marker `integration` registered.
@@ -1232,18 +1232,18 @@ Expected: PASS (59).
 
 - [ ] **Step 5: Update docs (self-update obligation)**
 
-In `CLAUDE.md`:
+In `AGENTS.md`:
 - Conventions / MCP 안전모델: note the **reserve-first** refinement of the place/modify invariant ("시도 시 예약 / 실패 시 해제 / 성공 시 유지"), and the new `state_backend`(memory|redis) axis + env vars (`TOSSINVEST_STATE_BACKEND`, `TOSSINVEST_REDIS_URL`).
 - CRITICAL RULES `place_order` invariant: update finalize wording to reserve/commit/release.
 - 함정: add "redis 백엔드는 카운터가 진실의 원천 → restore_spend(seed) no-op; memory 만 감사 리플레이 복원" and "돈은 Redis 에서도 decimal 문자열 + 분산락 RMW (INCRBYFLOAT 금지)".
 
-In `docs/claude/pytossinvest-mcp.md`:
+In `docs/wiki/pytossinvest-mcp.md`:
 - Add a "상태 백엔드 (memory|redis)" section: store seam, reserve-first lifecycle, redis Lock+Decimal, fail-closed, audit stream. Update the place/modify token-lifecycle description.
 
 - [ ] **Step 6: Commit (intended point)**
 
 ```bash
-git add pytossinvest-mcp/pyproject.toml CLAUDE.md docs/claude/pytossinvest-mcp.md
+git add pytossinvest-mcp/pyproject.toml AGENTS.md docs/wiki/pytossinvest-mcp.md
 git commit -m "chore(mcp): redis/fakeredis deps + docs for state backend"
 ```
 

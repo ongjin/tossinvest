@@ -540,12 +540,12 @@ git commit -m "feat(safety): persist modify deltas to audit and restore them on 
 
 ---
 
-## Task 6: 문서 동기화 (CRITICAL RULE + 함정 + docs/claude + 테스트 수)
+## Task 6: 문서 동기화 (CRITICAL RULE + 함정 + docs/wiki + 테스트 수)
 
 **Files:**
-- Modify: `CLAUDE.md` (CRITICAL RULES modify 항목, 함정 절 C1/M1, Conventions 안전모델 한 줄)
-- Modify: `docs/claude/tossinvest-mcp.md` (통화 판정·modify 토큰 생애·부팅 복원 절)
-- Modify: 테스트 수 표기가 있는 곳(`CLAUDE.md` Commands, `pytossinvest/README.md`/`tossinvest-mcp/README.md` 해당 시)
+- Modify: `AGENTS.md` (CRITICAL RULES modify 항목, 함정 절 C1/M1, Conventions 안전모델 한 줄)
+- Modify: `docs/wiki/tossinvest-mcp.md` (통화 판정·modify 토큰 생애·부팅 복원 절)
+- Modify: 테스트 수 표기가 있는 곳(`AGENTS.md` Commands, `pytossinvest/README.md`/`tossinvest-mcp/README.md` 해당 시)
 
 **Interfaces:** (문서만 — 코드 인터페이스 변화 없음)
 
@@ -557,28 +557,28 @@ uv run --package pytossinvest --extra dev pytest pytossinvest/tests -q 2>&1 | ta
 ```
 두 명령의 통과 개수를 기록(MCP 신규 합계 = 기존 98 − release 1 + 신규 C1/M1 테스트; 정확한 수는 출력값 사용). 이 수치로 아래 문서 갱신.
 
-- [ ] **Step 2: CLAUDE.md CRITICAL RULES — modify 불변식 수정** — `place_order` 안전 불변식 항목의 modify 문장을 교체. 현재:
+- [ ] **Step 2: AGENTS.md CRITICAL RULES — modify 불변식 수정** — `place_order` 안전 불변식 항목의 modify 문장을 교체. 현재:
 > **modify 도 동형 2단계**(`preview_modify`→`modify_order(confirmation_token)`): consume → 가드레일 재검사(`check_daily=False`, M1 — 일일누적 미가산) → 실행 → 성공 시 `release`(pop only) / 실패 시 토큰 유지. 우회 금지.
 
 를 교체:
 > **modify 도 동형 2단계**(`preview_modify`→`modify_order(confirmation_token)`): consume → 가드레일 재검사(**델타 회계** — `check_daily=True, prev_notional=원본명목`, 일일 증분=`new−old`만 검사) → 실행 → 성공 시 `finalize(델타)`(pop + 부호있는 델타 가산, `record_spend` 0-하한) / 실패 시 토큰 유지. 우회 금지.
 
-- [ ] **Step 3: CLAUDE.md 함정 절 — C1·M1 갱신** — 통화 판정 항목에서 `[C1 알려진 한계]` 문장을 "해결됨"으로 갱신:
+- [ ] **Step 3: AGENTS.md 함정 절 — C1·M1 갱신** — 통화 판정 항목에서 `[C1 알려진 한계]` 문장을 "해결됨"으로 갱신:
 > **통화 판정**(M1·C1 후속 반영): preview(`preview_order`/`preview_modify`)가 `get_prices([symbol])` 한 번으로 **권위 통화**(`Price.currency`)를 얻어 `build_spec(currency=…)` 로 주입; 조회 실패/빈결과/공백통화는 `order_currency(symbol)`(알파벳=USD·숫자=KRW) **폴백**. 즉 `BRK.B` 등도 API 통화가 있으면 정확, 없으면 종전 심볼모양으로 안전 강등. notional 단위는 주문통화, FX 환산 없음. KRW/USD 버킷 분리 유지.
 
 그리고 `modify 일일누적 미가산(M1)` 항목을 교체:
 > **modify 델타 회계(M1)** — modify 는 일일 버킷에 **부호있는 델타**(`new−old`)를 검사·가산. `preview_modify` 가 원본 주문 명목(`get_order` 의 price×qty)을 `spec.prev_notional` 로 잡고, 일일검사는 증분만(`spent+delta>cap` 이면 `daily-limit`), per-order/고액/하드실링은 여전히 전액. 성공 시 `finalize(델타)`, `record_spend` 가 0-하한. 한계: 일일버킷은 단순합이라 앱에서 직접 낸 주문을 다운사이즈하면 credit 되어 한도가 느슨해질 수 있음(0-하한으로 음수만 방지). 부팅복원은 `placed`+`modified` 델타 합산 후 0-하한.
 
-- [ ] **Step 4: CLAUDE.md Conventions 안전모델 한 줄 갱신** — "preview→place / preview_modify→modify 2단계 + consume-on-success 멱등성(modify 는 `release`)" 에서 `modify 는 release` 를 `modify 는 finalize(델타)` 로 수정.
+- [ ] **Step 4: AGENTS.md Conventions 안전모델 한 줄 갱신** — "preview→place / preview_modify→modify 2단계 + consume-on-success 멱등성(modify 는 `release`)" 에서 `modify 는 release` 를 `modify 는 finalize(델타)` 로 수정.
 
-- [ ] **Step 5: docs/claude/tossinvest-mcp.md 동기화** — 통화 판정 절(`order_currency` 설명)·modify 토큰 생애 절·부팅 복원 절을 위 사실로 갱신(권위통화+폴백, 델타 회계+finalize, restore 가 modified 포함+0-하한, `release` 제거). `[C1 알려진 한계]` 문구 제거/갱신.
+- [ ] **Step 5: docs/wiki/tossinvest-mcp.md 동기화** — 통화 판정 절(`order_currency` 설명)·modify 토큰 생애 절·부팅 복원 절을 위 사실로 갱신(권위통화+폴백, 델타 회계+finalize, restore 가 modified 포함+0-하한, `release` 제거). `[C1 알려진 한계]` 문구 제거/갱신.
 
-- [ ] **Step 6: 테스트 수 표기 갱신** — `CLAUDE.md` Commands 절의 `MCP (98)` 와 `pytossinvest/README.md`·`tossinvest-mcp/README.md` 의 테스트 수 표기를 Step 1 의 실제 수로 갱신(SDK 는 미변경이라 동일할 것).
+- [ ] **Step 6: 테스트 수 표기 갱신** — `AGENTS.md` Commands 절의 `MCP (98)` 와 `pytossinvest/README.md`·`tossinvest-mcp/README.md` 의 테스트 수 표기를 Step 1 의 실제 수로 갱신(SDK 는 미변경이라 동일할 것).
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add CLAUDE.md docs/claude/tossinvest-mcp.md pytossinvest/README.md tossinvest-mcp/README.md
+git add AGENTS.md docs/wiki/tossinvest-mcp.md pytossinvest/README.md tossinvest-mcp/README.md
 git commit -m "docs: sync C1 authoritative currency + M1 modify delta accounting"
 ```
 
@@ -601,4 +601,4 @@ git commit -m "docs: sync C1 authoritative currency + M1 modify delta accounting
 | `tossinvest-mcp/tests/test_safety_guardrails.py` | 1, 3 |
 | `tossinvest-mcp/tests/test_tools_write.py` | 2, 4 |
 | `tossinvest-mcp/tests/test_safety_tokens.py` | 4(release 테스트 제거·하한), 5(restore) |
-| `CLAUDE.md`, `docs/claude/tossinvest-mcp.md`, READMEs | 6 |
+| `AGENTS.md`, `docs/wiki/tossinvest-mcp.md`, READMEs | 6 |

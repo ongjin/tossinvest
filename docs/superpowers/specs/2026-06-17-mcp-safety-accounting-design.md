@@ -89,9 +89,9 @@ self._spent[currency] = max(Decimal("0"), self._spent.get(currency, Decimal("0")
 
 ## 6. 불변식 / 문서 변경
 
-- **CLAUDE.md CRITICAL RULES** 의 modify 항목: "성공 시 `release`(pop only) … 일일누적 미가산(M1)" → **"성공 시 델타 가산(`finalize(delta)`), 일일 델타 검사+가산"** 으로 수정.
-- **CLAUDE.md 함정 절**: C1 항목(이제 권위 통화 + 폴백)·M1 항목(델타 회계) 갱신. `order_amount` 함정 등 나머지는 유지.
-- **docs/claude/tossinvest-mcp.md**: 가드레일 통화 판정·modify 토큰 생애·부팅 복원 절 동기화.
+- **AGENTS.md CRITICAL RULES** 의 modify 항목: "성공 시 `release`(pop only) … 일일누적 미가산(M1)" → **"성공 시 델타 가산(`finalize(delta)`), 일일 델타 검사+가산"** 으로 수정.
+- **AGENTS.md 함정 절**: C1 항목(이제 권위 통화 + 폴백)·M1 항목(델타 회계) 갱신. `order_amount` 함정 등 나머지는 유지.
+- **docs/wiki/tossinvest-mcp.md**: 가드레일 통화 판정·modify 토큰 생애·부팅 복원 절 동기화.
 - **관련 알려진 항목(범위 밖)**: `_market_gate` 의 `symbol.isalpha()` 국가판정(`tools.py:125`)은 장시간 게이트(live 전용)에서 같은 휴리스틱을 쓴다 — 본 스펙 미수정, 후속 가능 항목으로 문서에 한 줄 남김.
 
 ## 7. 테스트 전략 (TDD)
@@ -119,4 +119,4 @@ self._spent[currency] = max(Decimal("0"), self._spent.get(currency, Decimal("0")
 | `tossinvest-mcp/src/tossinvest_mcp/safety.py` | `build_spec(currency=...)`, `OrderSpec.prev_notional`, `check_guardrails(prev_notional=...)` 델타 일일검사, `record_spend` 0 하한, `restore_spend` modified 합산+하한, `release` 제거 |
 | `tossinvest-mcp/src/tossinvest_mcp/tools.py` | `preview_order`/`preview_modify` 통화 조회+주입, single get_prices 공유, preview_modify N_old 계산, modify_order `finalize(delta)`, 감사에 currency/delta |
 | `tossinvest-mcp/tests/` | C1·M1 테스트 추가 |
-| `CLAUDE.md`, `docs/claude/tossinvest-mcp.md` | 불변식·함정·통화/복원 절 갱신 |
+| `AGENTS.md`, `docs/wiki/tossinvest-mcp.md` | 불변식·함정·통화/복원 절 갱신 |

@@ -35,7 +35,7 @@
 - `pytossinvest-mcp/tests/test_transport.py` — **NEW**: `run_server` routes http→`serve_http` (auth-wrapped app, host/port) and stdio→`mcp.run()`.
 - `deploy/Dockerfile`, `deploy/docker-compose.yml`, `deploy/.env.example` — **NEW**: app + Redis (AOF on) deployment template.
 - `README.md` (package `pytossinvest-mcp/README.md`) — http-mode run instructions (folded into the deploy task).
-- `CLAUDE.md`, `docs/claude/pytossinvest-mcp.md` — docs self-update (final task).
+- `AGENTS.md`, `docs/wiki/pytossinvest-mcp.md` — docs self-update (final task).
 
 ---
 
@@ -521,19 +521,19 @@ git commit -m "feat(mcp): docker deploy template (app + redis AOF) + http run do
 
 ---
 
-### Task 5: Docs self-update (CLAUDE.md + docs/claude/pytossinvest-mcp.md)
+### Task 5: Docs self-update (AGENTS.md + docs/wiki/pytossinvest-mcp.md)
 
 **Files:**
-- Modify: `CLAUDE.md`, `docs/claude/pytossinvest-mcp.md`
+- Modify: `AGENTS.md`, `docs/wiki/pytossinvest-mcp.md`
 
-- [ ] **Step 1: Update `CLAUDE.md`**
+- [ ] **Step 1: Update `AGENTS.md`**
 - Commands: update the MCP test count to the new total (run the suite first to get the exact number).
 - Conventions (설정 line): append the new env vars to the `TOSSINVEST_` list — `TRANSPORT`/`HTTP_HOST`/`HTTP_PORT`/`AUTH_TOKEN`.
 - MCP 안전모델 / Conventions: add the new **transport axis** — `TOSSINVEST_TRANSPORT`=`stdio`(기본·무변경) / `http`(원격, bearer 인증 필수). Note it is orthogonal to `mode` (read_only/paper/live) and `state_backend` (memory/redis).
 - 함정 (one line): http 모드는 `TOSSINVEST_AUTH_TOKEN` 없이 부팅 거부(config validator 삼중 게이트 — live/redis 와 동형 fail-closed); bearer 는 `hmac.compare_digest` 상수시간 비교; MCP 엔드포인트는 `/mcp` (Streamable HTTP, `stateless_http=True`); uvicorn 은 옵션 `[http]` extra, 런타임에만 import.
 - Remove/replace any remaining "transport 는 현재 stdio 단일" wording (stdio 는 이제 기본이고 http 가 선택지).
 
-- [ ] **Step 2: Update `docs/claude/pytossinvest-mcp.md`**
+- [ ] **Step 2: Update `docs/wiki/pytossinvest-mcp.md`**
 - Add `http.py` to the module map: ASGI 조립 + bearer 미들웨어 (`BearerAuthMiddleware`/`build_http_app`/`serve_http`).
 - Add a transport section: `TOSSINVEST_TRANSPORT=stdio|http`; stdio=`mcp.run()` (기본·무변경); http=`mcp.streamable_http_app()`(Starlette, `/mcp`) + `BearerAuthMiddleware` + uvicorn(`serve_http`). `build_server` sets `stateless_http` when http; `run_server` branches.
 - Add the auth pitfall: http⇒auth_token 필수(부팅 거부), 상수시간 bearer 비교, 단일테넌트(토큰은 엔드포인트 인증일 뿐 유저 자격증명/Redis 미저장).
@@ -546,7 +546,7 @@ Run: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests -q` (green
 - [ ] **Step 4: Commit**
 
 ```bash
-git add CLAUDE.md docs/claude/pytossinvest-mcp.md
+git add AGENTS.md docs/wiki/pytossinvest-mcp.md
 git commit -m "docs(mcp): remote http transport + bearer endpoint auth"
 ```
 

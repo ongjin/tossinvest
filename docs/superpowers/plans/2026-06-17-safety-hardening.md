@@ -49,7 +49,7 @@
 - `tossinvest-mcp/src/tossinvest_mcp/server.py` — 부팅 `restore_spend` 와이어링(#5)·`preview_modify` 등록 + `modify_order` 시그니처 교체(#1).
 - `tossinvest-mcp/tests/conftest.py` — `FakeClient.get_order` 를 현실적 주문으로 보강(modify/cancel 용).
 - `tossinvest-mcp/tests/*` — 신규/갱신 테스트.
-- `tossinvest-mcp/README.md`, `CLAUDE.md`, `docs/claude/tossinvest-mcp.md` — 문서.
+- `tossinvest-mcp/README.md`, `AGENTS.md`, `docs/wiki/tossinvest-mcp.md` — 문서.
 
 ---
 
@@ -1291,31 +1291,31 @@ git add tossinvest-mcp/README.md
 
 ---
 
-## Task 11: 문서 자가갱신 — `CLAUDE.md` 안전 불변식 + `docs/claude/tossinvest-mcp.md`
+## Task 11: 문서 자가갱신 — `AGENTS.md` 안전 불변식 + `docs/wiki/tossinvest-mcp.md`
 
 코드가 진실. 안전 불변식 변화(2단계 modify·통화별 한도·부팅 복원·양수검증·live 지연)와 14 툴·신규 env·새 함정을 living 문서에 반영. (자가갱신 규칙 — 같은 세션, 커밋은 수동.)
 
 **Files:**
-- Modify: `CLAUDE.md` (CRITICAL RULES 의 `place_order` 불변식 항목 — modify 게이트화 한 줄, Conventions 의 MCP 안전모델 — 통화별 한도/2단계 modify/부팅복원, env 목록에 USD·min-delay, 함정에 새 항목)
-- Modify: `docs/claude/tossinvest-mcp.md` (가드레일 통화별, preview→place/modify 토큰 생애, 14 툴, config, 함정, 새 툴 추가 절차 영향)
+- Modify: `AGENTS.md` (CRITICAL RULES 의 `place_order` 불변식 항목 — modify 게이트화 한 줄, Conventions 의 MCP 안전모델 — 통화별 한도/2단계 modify/부팅복원, env 목록에 USD·min-delay, 함정에 새 항목)
+- Modify: `docs/wiki/tossinvest-mcp.md` (가드레일 통화별, preview→place/modify 토큰 생애, 14 툴, config, 함정, 새 툴 추가 절차 영향)
 
 **Interfaces:** (문서)
 
-- [ ] **Step 1: `CLAUDE.md` — `place_order` 안전 불변식 항목에 modify 추가**. CRITICAL RULES 의 `**place_order 안전 불변식 ...` 항목 끝에 문장 추가:
+- [ ] **Step 1: `AGENTS.md` — `place_order` 안전 불변식 항목에 modify 추가**. CRITICAL RULES 의 `**place_order 안전 불변식 ...` 항목 끝에 문장 추가:
 
 ```markdown
  **modify 도 동형 2단계**(`preview_modify`→`modify_order(confirmation_token)`): consume → 가드레일 재검사(`check_daily=False`, M1 — 일일누적 미가산) → 실행 → 성공 시 `release`(pop only) / 실패 시 토큰 유지. 우회 금지.
 ```
 
-- [ ] **Step 2: `CLAUDE.md` — Conventions 의 MCP 안전모델 줄 갱신**. "가드레일(주문당·일일 상한·allow/deny·1억↑ confirm 필수·30억↑ 거부·장시간 게이트는 live 전용)." 를 아래로 교체:
+- [ ] **Step 2: `AGENTS.md` — Conventions 의 MCP 안전모델 줄 갱신**. "가드레일(주문당·일일 상한·allow/deny·1억↑ confirm 필수·30억↑ 거부·장시간 게이트는 live 전용)." 를 아래로 교체:
 
 ```markdown
 가드레일(**주문통화별** 주문당·일일 상한·allow/deny·고액 confirm 필수·하드실링 거부 — KRW 1억/30억, USD $10만/$300만, 알파벳=USD·숫자=KRW·FX 환산 X; 장시간 게이트는 live 전용). preview→place / preview_modify→modify 2단계 + consume-on-success 멱등성(modify 는 `release`) + place 시 일일한도 재검사 + 부팅 시 감사로그로 당일 누적 복원 + 감사로그(JSONL).
 ```
 
-- [ ] **Step 3: `CLAUDE.md` — 설정 항목에 신규 env**. Conventions 의 `설정` 줄 env 목록 `.../ENFORCE_MARKET_HOURS)` 를 `.../ENFORCE_MARKET_HOURS/MAX_ORDER_AMOUNT_USD/DAILY_ORDER_LIMIT_USD/LIVE_CONFIRM_MIN_DELAY_SEC)` 로 확장.
+- [ ] **Step 3: `AGENTS.md` — 설정 항목에 신규 env**. Conventions 의 `설정` 줄 env 목록 `.../ENFORCE_MARKET_HOURS)` 를 `.../ENFORCE_MARKET_HOURS/MAX_ORDER_AMOUNT_USD/DAILY_ORDER_LIMIT_USD/LIVE_CONFIRM_MIN_DELAY_SEC)` 로 확장.
 
-- [ ] **Step 4: `CLAUDE.md` — 함정 절에 새 항목 추가**. "## 주의할 함정" 목록 끝에:
+- [ ] **Step 4: `AGENTS.md` — 함정 절에 새 항목 추가**. "## 주의할 함정" 목록 끝에:
 
 ```markdown
 - **통화 판정은 심볼 모양** — 알파벳 심볼=USD, 숫자=KRW(FX 환산 없음). KRW/USD 일일누적 버킷이 분리돼 한 통화 한도가 다른 통화를 막지 않는다. notional 단위는 주문통화.
@@ -1323,7 +1323,7 @@ git add tossinvest-mcp/README.md
 - **_spent 부팅 복원** — `place` 감사에 `currency`+`notional` 기록, 서버 시작 시 `audit.read_events()`→`safety.restore_spend` 가 당일(UTC ts→KST 날짜) `placed` 합산. 감사 파일 지우면 당일 누적도 리셋됨(주의).
 ```
 
-- [ ] **Step 5: `docs/claude/tossinvest-mcp.md` 갱신** — 아래를 반영(코드와 일치하게):
+- [ ] **Step 5: `docs/wiki/tossinvest-mcp.md` 갱신** — 아래를 반영(코드와 일치하게):
   - "## 가드레일" 절: 통화별 임계 세트(KRW/USD 상수·config), `check_daily` 플래그, 순서 불변 재확인.
   - "## preview → place 토큰 생애" 절: `consume` 의 live 최소지연 게이트, `finalize`(place, 통화 유도) vs `release`(modify, 미가산), place 시 재검사 추가.
   - "## 13 툴" → "## 14 툴": `preview_modify` 추가, `modify_order` 시그니처 `(confirmation_token)` 로, cancel previousStatus 감사 명시.
@@ -1343,7 +1343,7 @@ Expected: 둘 다 PASS. 출력의 `N passed` 를 README 배지/문서 카운트�
 - [ ] **Step 7: 스테이징 + 메시지 준비**
 
 ```bash
-git add CLAUDE.md docs/claude/tossinvest-mcp.md tossinvest-mcp/README.md
+git add AGENTS.md docs/wiki/tossinvest-mcp.md tossinvest-mcp/README.md
 # 메시지: "docs: self-update safety invariants (two-step modify, per-currency caps, boot restore, 14 tools)"
 ```
 
@@ -1521,9 +1521,9 @@ def test_200_deeply_nested_json_raises_invalid_response():
 ## Task 15: 문서 — C1 알려진 한계 + Round 2 반영
 
 **Files:**
-- Modify: `CLAUDE.md`, `docs/claude/tossinvest-mcp.md`
+- Modify: `AGENTS.md`, `docs/wiki/tossinvest-mcp.md`
 
-- [ ] **Step 1:** `CLAUDE.md` 함정 절의 통화 판정 항목에 **C1 알려진 한계** 한 줄 추가: 점/접미사 포함 US 티커(`BRK.B` 등)·공백 변형은 `isalpha()` 로 KRW 판정되어 KRW 임계가 적용됨(회귀 아님 — 이전엔 전부 KRW). 정확한 통화는 권위 데이터(`get_stocks`/`get_prices`의 currency) 기반 후속 PR 과제. 외부의존 0 결정 유지.
-- [ ] **Step 2:** `CLAUDE.md` + `docs/claude/tossinvest-mcp.md` 에 Round 2 사실 반영: 새 에러코드 `invalid-order-params`(order_amount+price/quantity 동시 거부), deny/allow 매칭은 대소문자·공백 무시(정규화, spec.symbol 자체는 불변), restore_spend 손상 이벤트 skip(부팅 견고), SDK 200 경로가 `RecursionError`도 invalid-response 로 처리.
+- [ ] **Step 1:** `AGENTS.md` 함정 절의 통화 판정 항목에 **C1 알려진 한계** 한 줄 추가: 점/접미사 포함 US 티커(`BRK.B` 등)·공백 변형은 `isalpha()` 로 KRW 판정되어 KRW 임계가 적용됨(회귀 아님 — 이전엔 전부 KRW). 정확한 통화는 권위 데이터(`get_stocks`/`get_prices`의 currency) 기반 후속 PR 과제. 외부의존 0 결정 유지.
+- [ ] **Step 2:** `AGENTS.md` + `docs/wiki/tossinvest-mcp.md` 에 Round 2 사실 반영: 새 에러코드 `invalid-order-params`(order_amount+price/quantity 동시 거부), deny/allow 매칭은 대소문자·공백 무시(정규화, spec.symbol 자체는 불변), restore_spend 손상 이벤트 skip(부팅 견고), SDK 200 경로가 `RecursionError`도 invalid-response 로 처리.
 - [ ] **Step 3:** 최종 카운트 재확인 후 모든 문서/README 의 테스트 수 갱신(SDK·MCP 최종 그린 수).
-- [ ] **Step 4: Commit** — `git add` CLAUDE.md docs/claude/tossinvest-mcp.md (+ 카운트 바뀐 README); msg: `docs: document currency-by-symbol limitation and round-2 hardening`
+- [ ] **Step 4: Commit** — `git add` AGENTS.md docs/wiki/tossinvest-mcp.md (+ 카운트 바뀐 README); msg: `docs: document currency-by-symbol limitation and round-2 hardening`

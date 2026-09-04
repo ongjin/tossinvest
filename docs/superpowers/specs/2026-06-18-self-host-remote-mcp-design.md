@@ -82,7 +82,7 @@
 
 **구현 결정:**
 - ⚠️ **돈은 Redis 에서도 Decimal/문자열** (CRITICAL RULE 준수) — Redis 의 `INCR`/`INCRBYFLOAT` 는 long double 기반이라 **decimal-safe 하지 않다**. 일일캡 카운터는 돈이므로 **decimal 문자열로 저장**하고, 증감은 **분산락 안에서 Python `Decimal` read-modify-write** 로 한다. (paper 평단가·현금도 동일.)
-- **일일캡 = reserve-first 로 통일** — 문서화된 "성공 시에만 finalize" 불변식을 **"시도 시 예약 / 실패 시 해제 / 성공 시 유지"** 로 정제(캡 강제 효과 동일, 분산안전 필수). 예약은 **(day,currency) 단위 Redis 분산락(redis-py `Lock`) 안에서 Decimal RMW** — `cur+delta≤cap` 이면 카운터=`str(cur+delta)`. memory 도 같은 의미로 통일(dict). **구현 시 CLAUDE.md 불변식 문구 갱신 대상.**
+- **일일캡 = reserve-first 로 통일** — 문서화된 "성공 시에만 finalize" 불변식을 **"시도 시 예약 / 실패 시 해제 / 성공 시 유지"** 로 정제(캡 강제 효과 동일, 분산안전 필수). 예약은 **(day,currency) 단위 Redis 분산락(redis-py `Lock`) 안에서 Decimal RMW** — `cur+delta≤cap` 이면 카운터=`str(cur+delta)`. memory 도 같은 의미로 통일(dict). **구현 시 AGENTS.md 불변식 문구 갱신 대상.**
 - **paper 도 동일 분산락** — place 를 (account 단위) Redis 락으로 감싸 Python 평단가 수학 그대로 유지. clientOrderId dedup 도 락 안에서.
 - **커스텀 Lua 없음** — 원자성은 redis-py 내장 `Lock`(`SET NX PX` 기반, fakeredis 지원) 으로. 멱등 셋(`reserved:{day}`)의 SADD/SISMEMBER 는 돈이 아니라 그대로 사용.
 - **redis 백엔드는 카운터가 진실의 원천** — AOF 내구+공유라 감사로그 리플레이 복원 불필요. `restore_spend` 는 memory 백엔드 전용. 감사 stream 은 신뢰/디버그용.
@@ -195,7 +195,7 @@
 
 ---
 
-## 부록. 영향받는 불변식 (구현 후 CLAUDE.md / docs/claude 갱신 대상)
+## 부록. 영향받는 불변식 (구현 후 AGENTS.md / docs/wiki 갱신 대상)
 
 - `place_order`/`modify_order` 안전 불변식: "성공 시 finalize" → **"시도 시 reserve / 실패 시 release / 성공 시 유지"** (분산안전 정제, 효과 동일).
 - 일일누적 복원: redis 백엔드는 카운터가 진실의 원천(감사 리플레이 불필요), memory 백엔드만 `restore_spend` 유지.

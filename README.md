@@ -143,7 +143,7 @@ uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 59 passi
 uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # 179 passing
 ```
 
-더 깊은 문서는 [`docs/claude/`](docs/claude/) — [API 레퍼런스](docs/claude/tossinvest-open-api.md) · [SDK 내부구조](docs/claude/pytossinvest-sdk.md) · [MCP 안전모델](docs/claude/pytossinvest-mcp.md).
+더 깊은 문서는 [`docs/wiki/`](docs/wiki/) — [API 레퍼런스](docs/wiki/tossinvest-open-api.md) · [SDK 내부구조](docs/wiki/pytossinvest-sdk.md) · [MCP 안전모델](docs/wiki/pytossinvest-mcp.md).
 
 ---
 

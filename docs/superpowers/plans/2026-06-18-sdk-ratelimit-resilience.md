@@ -437,13 +437,13 @@ git commit -m "feat(client): bounded auto-retry on 429 (Retry-After/backoff+jitt
 
 ---
 
-## Task 4: 문서 동기화 (SDK 규약 + docs/claude + README + 테스트 수)
+## Task 4: 문서 동기화 (SDK 규약 + docs/wiki + README + 테스트 수)
 
 **Files:**
-- Modify: `CLAUDE.md` (Conventions SDK 규약의 v0.0.1 한계 문구)
-- Modify: `docs/claude/pytossinvest-sdk.md` (`ratelimit.py` + `_request` 절)
+- Modify: `AGENTS.md` (Conventions SDK 규약의 v0.0.1 한계 문구)
+- Modify: `docs/wiki/pytossinvest-sdk.md` (`ratelimit.py` + `_request` 절)
 - Modify: `pytossinvest/README.md` (레이트리밋 한계 문구)
-- Modify: 테스트 수 표기(`CLAUDE.md` Commands)
+- Modify: 테스트 수 표기(`AGENTS.md` Commands)
 
 **Interfaces:** (문서만)
 
@@ -455,22 +455,22 @@ uv run --package tossinvest-mcp pytest tossinvest-mcp/tests -q 2>&1 | tail -1
 ```
 SDK 신규 수 기록(기존 46 + Task1 4 + Task2 3 + Task3 [기존 1 교체 → 신규 7, 순증 6] = 약 59). 실제 출력값 사용. MCP 는 109 무변경.
 
-- [ ] **Step 2: CLAUDE.md SDK 규약 갱신** — Conventions 의 SDK 규약 줄에서
+- [ ] **Step 2: AGENTS.md SDK 규약 갱신** — Conventions 의 SDK 규약 줄에서
 > v0.0.1 한계: 헤더 동적 동기화·자동 retry/backoff 미구현(`RateLimitError.retry_after` 던짐 → 호출자/ MCP 책임).
 
 를 교체:
 > v0.0.2: `X-RateLimit-*` 헤더로 버킷 동적 동기화(헤더가 진실 — 본 그룹은 피크반토막 미적용), 429 **bounded 자동 retry**(`Retry-After` 또는 지수백오프+jitter, `max_retries` 기본 3, `retry_max_wait` 60s 상한) 구현. **5xx·타임아웃은 비재시도**(호출자 책임). 소진 시 종전대로 `RateLimitError` throw.
 
-- [ ] **Step 3: CLAUDE.md Commands 테스트 수** — `SDK (46)` 표기를 Step 1 의 실제 수로 갱신(예: `SDK (59)`), 총계도 갱신(SDK+MCP).
+- [ ] **Step 3: AGENTS.md Commands 테스트 수** — `SDK (46)` 표기를 Step 1 의 실제 수로 갱신(예: `SDK (59)`), 총계도 갱신(SDK+MCP).
 
-- [ ] **Step 4: docs/claude/pytossinvest-sdk.md 갱신** — `ratelimit.py` 항목의 "⚠ v0.0.1 은 정적 기본값 + 피크반토막만 — 헤더 동적 동기화·자동 retry/backoff 미구현" 문구를, 구현됨으로 갱신: `backoff_wait` 헬퍼 추가; `_sync_bucket_from_headers`(Limit→capacity, 1/Reset→refill, min(_tokens,Remaining), 그룹별 `_rate_from_header` 플래그 → 헤더 본 그룹은 `_gate` 가 피크반토막 미적용); `_request` 가 응답마다 헤더 동기화 + 429 한정 bounded 재시도(`_attempt`, `backoff_wait`, `self._sleep`), 5xx 비재시도; 생성자 `max_retries`/`retry_max_wait`/`rng`. `_request` 오케스트레이션 설명에 429 재시도 단계 반영.
+- [ ] **Step 4: docs/wiki/pytossinvest-sdk.md 갱신** — `ratelimit.py` 항목의 "⚠ v0.0.1 은 정적 기본값 + 피크반토막만 — 헤더 동적 동기화·자동 retry/backoff 미구현" 문구를, 구현됨으로 갱신: `backoff_wait` 헬퍼 추가; `_sync_bucket_from_headers`(Limit→capacity, 1/Reset→refill, min(_tokens,Remaining), 그룹별 `_rate_from_header` 플래그 → 헤더 본 그룹은 `_gate` 가 피크반토막 미적용); `_request` 가 응답마다 헤더 동기화 + 429 한정 bounded 재시도(`_attempt`, `backoff_wait`, `self._sleep`), 5xx 비재시도; 생성자 `max_retries`/`retry_max_wait`/`rng`. `_request` 오케스트레이션 설명에 429 재시도 단계 반영.
 
 - [ ] **Step 5: pytossinvest/README.md 갱신** — "레이트리밋은 정적 기본값 + 피크 반토막만 … 동적 동기화 … 미구현(v0.0.2 예정)" 문단을 구현됨으로 갱신(헤더 동기화 + 429 자동 retry, 5xx 비재시도, 생성자 노브). 테스트 수 표기 있으면 갱신.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add CLAUDE.md docs/claude/pytossinvest-sdk.md pytossinvest/README.md
+git add AGENTS.md docs/wiki/pytossinvest-sdk.md pytossinvest/README.md
 git commit -m "docs: SDK rate-limit dynamic header sync + bounded 429 retry"
 ```
 
@@ -492,4 +492,4 @@ git commit -m "docs: SDK rate-limit dynamic header sync + bounded 429 retry"
 | `pytossinvest/src/pytossinvest/client.py` | 2(헤더 동기화·_gate 분기), 3(429 재시도·생성자 노브) |
 | `pytossinvest/tests/test_ratelimit.py` | 1 |
 | `pytossinvest/tests/test_client_core.py` | 2, 3 |
-| `CLAUDE.md`, `docs/claude/pytossinvest-sdk.md`, `pytossinvest/README.md` | 4 |
+| `AGENTS.md`, `docs/wiki/pytossinvest-sdk.md`, `pytossinvest/README.md` | 4 |

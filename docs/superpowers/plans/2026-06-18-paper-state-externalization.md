@@ -555,15 +555,15 @@ git commit -m "feat(mcp): backend-select paper store; paper parity + concurrent-
 ### Task 5: Docs self-update
 
 **Files:**
-- Modify: `CLAUDE.md`, `docs/claude/pytossinvest-mcp.md`
+- Modify: `AGENTS.md`, `docs/wiki/pytossinvest-mcp.md`
 
-- [ ] **Step 1: Update `CLAUDE.md`**
+- [ ] **Step 1: Update `AGENTS.md`**
 - Commands: update the MCP test count to the new total (run the suite first to get the exact number).
 - Remove/adjust the Plan-1 interim limitation note that said "redis 백엔드 + 멀티인스턴스에서 paper 상태는 인스턴스별" — paper state is now externalized; under redis it is shared and survives restart.
 - Add to the 함정 list (one line): paper state externalized via `PaperStore` (memory|redis); redis paper = single JSON key under a `lock:paper` redis-py Lock, money as decimal strings, `place()` idempotent by `clientOrderId` (repeated id returns the existing order, no second fill).
 - Update the MCP 안전모델 / Conventions line if it described paper as in-memory-only.
 
-- [ ] **Step 2: Update `docs/claude/pytossinvest-mcp.md`**
+- [ ] **Step 2: Update `docs/wiki/pytossinvest-mcp.md`**
 - In the state-backend section, add paper: `PaperStore` seam (`MemoryPaperStore` default | `RedisPaperStore`), `PaperState` (cash/positions/orders/realized_pnl/counter, money as decimal strings), `lock:paper` redis Lock, `clientOrderId` dedup inside the lock, redis key `paper`.
 - Update any "paper 즉시체결 / in-memory" descriptions to note the store seam. Keep the "paper modify/cancel is live-only" pitfall (unchanged).
 
@@ -574,7 +574,7 @@ Run: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests -q` (green
 - [ ] **Step 4: Commit**
 
 ```bash
-git add CLAUDE.md docs/claude/pytossinvest-mcp.md
+git add AGENTS.md docs/wiki/pytossinvest-mcp.md
 git commit -m "docs(mcp): paper state externalization (PaperStore memory|redis)"
 ```
 

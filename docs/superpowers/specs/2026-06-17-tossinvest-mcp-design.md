@@ -197,4 +197,4 @@ API 가 사전신청 단계라 **라이브 의존 없이 전부 테스트 가능
 ## 부록 A. 의존 레퍼런스
 
 토스증권 Open API 상세 스펙(인증 2층·엔드포인트·rate limit·에러코드·주문 스키마·함정)은 별도 레퍼런스 문서 참조:
-`~/workspace/personal/blog/docs/claude/tossinvest-open-api.md` (canonical: `https://openapi.tossinvest.com/openapi-docs/latest/openapi.json`).
+`~/workspace/personal/blog/docs/wiki/tossinvest-open-api.md` (canonical: `https://openapi.tossinvest.com/openapi-docs/latest/openapi.json`).
