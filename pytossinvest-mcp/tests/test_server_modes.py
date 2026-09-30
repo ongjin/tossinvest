@@ -8,9 +8,12 @@ from pytossinvest_mcp.server import build_server, build_app_context
 from conftest import FakeClient  # reuse the fake (pytest puts tests/ on sys.path)
 
 READ_TOOLS = {"get_accounts", "get_holdings", "get_buying_power", "get_quote", "get_candles",
-              "get_stock_info", "get_market_info", "list_orders", "get_order"}
+              "get_stock_info", "get_market_info", "list_orders", "get_order",
+              "list_conditional_orders", "get_conditional_order"}
 WRITE_TOOLS = {"get_order_readiness", "preview_order", "place_order",
-               "preview_modify", "modify_order", "cancel_order"}
+               "preview_modify", "modify_order", "cancel_order",
+               "preview_conditional_order", "preview_conditional_modify",
+               "cancel_conditional_order"}
 
 
 def _build(tmp_path, mode, **kw):
@@ -183,3 +186,25 @@ def test_network_timeouts_reach_the_model(tmp_path):
 
 def test_list_orders_advertises_cursor(tmp_path):
     assert "cursor" in _props(_build(tmp_path, "read_only"), "list_orders")
+
+
+def test_conditional_params_advertise_enums(tmp_path):
+    mcp = _build(tmp_path, "live", allow_live=True)
+    preview = _props(mcp, "preview_conditional_order")
+    assert preview["type"]["enum"] == ["SINGLE", "OCO", "OTO"]
+    assert preview["order_type"]["enum"] == ["LIMIT", "MARKET"]
+    assert preview["first_side"]["enum"] == ["BUY", "SELL"]
+    assert "symbol" not in _props(mcp, "preview_conditional_modify")
+    assert _props(mcp, "list_conditional_orders")["status"]["enum"] == ["OPEN", "CLOSED"]
+
+
+def test_conditional_validation_reaches_the_model(tmp_path):
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+    mcp = _build(tmp_path, "live", allow_live=True)
+    args = {"symbol": "005930", "type": "OCO", "quantity": "10", "order_type": "LIMIT",
+            "expire_date": "2026-07-31", "first_side": "SELL", "first_trigger_price": "80000",
+            "first_order_price": "79900"}
+    with pytest.raises(ToolError) as e:
+        asyncio.run(mcp.call_tool("preview_conditional_order", args))
+    assert not isinstance(e.value, UnexpectedToolError)
+    assert "second_side" in str(e.value)
