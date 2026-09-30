@@ -126,11 +126,13 @@ class TossInvestClient:
         _retried: bool = False,
         _attempt: int = 0,
     ) -> Any:
+        if account and self._account_seq is None:
+            self.get_accounts()  # caches the first account's accountSeq
+            if self._account_seq is None:
+                raise RuntimeError("account context required but the API returned no account")
         self._gate(group)
         headers = {"Authorization": f"Bearer {self._token.get_token()}"}
         if account:
-            if self._account_seq is None:
-                raise RuntimeError("account context required but accountSeq not cached; call get_accounts() first")
             headers["X-Tossinvest-Account"] = str(self._account_seq)
 
         resp = self._http.request(

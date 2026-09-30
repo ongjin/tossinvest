@@ -162,3 +162,20 @@ def test_lowercase_side_is_rejected_with_a_visible_reason(tmp_path):
         asyncio.run(mcp.call_tool("preview_order", args))
     assert not isinstance(e.value, UnexpectedToolError)
     assert "BUY" in str(e.value)
+
+
+class _TimeoutClient(FakeClient):
+    def get_holdings(self, symbol=None):
+        import httpx
+        raise httpx.ReadTimeout("read timed out")
+
+
+def test_network_timeouts_reach_the_model(tmp_path):
+    # after an ambiguous place failure the model must know it was a timeout to retry the token
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+    settings = Settings(_env_file=None, mode="read_only", audit_log_path=str(tmp_path / "audit.log"))
+    mcp = build_server(settings, client=_TimeoutClient())
+    with pytest.raises(ToolError) as e:
+        asyncio.run(mcp.call_tool("get_holdings", {}))
+    assert not isinstance(e.value, UnexpectedToolError)
+    assert "timed out" in str(e.value)
