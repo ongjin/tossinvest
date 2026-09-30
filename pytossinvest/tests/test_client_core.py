@@ -71,6 +71,23 @@ def test_retries_once_on_expired_token():
 
 
 @respx.mock
+def test_retries_once_on_revoked_token():
+    # the API keeps one live token per client: another process re-issuing revokes ours
+    token_route = _token_route()
+    route = respx.get(f"{BASE}/api/v1/accounts").mock(
+        side_effect=[
+            httpx.Response(401, json={"error": {"code": "token-revoked", "message": ""}}),
+            httpx.Response(200, json={"result": []}),
+        ]
+    )
+    c = _client()
+    result = c._request("GET", "/api/v1/accounts", group="ACCOUNT")
+    assert result == []
+    assert route.call_count == 2
+    assert token_route.call_count == 2  # the revoked token was dropped and re-issued
+
+
+@respx.mock
 def test_max_retries_zero_raises_immediately():
     _token_route()
     route = respx.get(f"{BASE}/api/v1/prices").mock(return_value=httpx.Response(

@@ -33,6 +33,10 @@ _GROUP_RATES: dict[str, float] = {
     "ORDER_INFO": 6,
 }
 
+# 401 codes where a fresh token fixes the call. token-revoked: the API keeps one live token
+# per client, so another process issuing a token for the same client kills ours.
+_REISSUE_TOKEN_CODES = frozenset({"expired-token", "token-revoked"})
+
 
 class TossInvestClient:
     def __init__(
@@ -156,7 +160,7 @@ class TossInvestClient:
         if (
             resp.status_code == 401
             and not _retried
-            and (body.get("error") or {}).get("code") == "expired-token"
+            and (body.get("error") or {}).get("code") in _REISSUE_TOKEN_CODES
         ):
             self._token.invalidate()
             return self._request(
