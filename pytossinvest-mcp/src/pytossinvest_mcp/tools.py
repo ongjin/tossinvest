@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from .audit import AuditLog
 from .config import Settings
 from .paper import PaperBroker, PaperOrder
-from .safety import GuardrailError, SafetyManager
+from .safety import GuardrailError, SafetyManager, order_currency
 
 _KST = ZoneInfo("Asia/Seoul")
 
@@ -92,6 +92,21 @@ def get_holdings(app: AppContext, symbol: str | None = None) -> dict:
     return app.client.get_holdings(symbol)
 
 
+BUYING_POWER_CURRENCIES = ("KRW", "USD")
+
+
+def _buying_power_item(app: AppContext, currency: str) -> dict:
+    if app.use_paper:
+        return {"currency": currency, "cashBuyingPower": str(app.paper.buying_power(currency))}
+    bp = app.client.get_buying_power(currency)
+    return {"currency": bp.currency, "cashBuyingPower": str(bp.cash_buying_power)}
+
+
+def get_buying_power(app: AppContext, currency: str | None = None) -> dict:
+    currencies = (currency,) if currency else BUYING_POWER_CURRENCIES
+    return {"buyingPower": [_buying_power_item(app, c) for c in currencies]}
+
+
 def list_orders(app: AppContext, status: str = "OPEN", symbol: str | None = None) -> dict:
     if app.use_paper:
         items = [_paper_order_dict(o) for o in app.paper.list_orders()
@@ -112,9 +127,30 @@ def get_order(app: AppContext, order_id: str) -> dict:
 # --- write tools (readiness, preview -> place, modify/cancel) ---
 
 from decimal import Decimal  # noqa: E402  (appended section)
+from http import HTTPStatus  # noqa: E402
 
+from pytossinvest.errors import TossInvestError  # noqa: E402
 from pytossinvest.money import to_decimal  # noqa: E402
 from . import market_hours  # noqa: E402
+
+
+def _is_rejection(app: AppContext, e: Exception) -> bool:
+    """True when a failed place/modify certainly did not execute, so its reservation can go.
+    Paper fills are local and atomic. Live, only a Toss 4xx is certain: a timeout, dropped
+    connection or 5xx may have filled, so the reservation stays (a retry with the same token
+    reuses it via the clientOrderId dedup key, a fresh preview counts on top of it)."""
+    if app.use_paper:
+        return True
+    status = e.http_status if isinstance(e, TossInvestError) else None
+    return status is not None and status < HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+def _settle_failure(app: AppContext, spec, e: Exception) -> str:
+    """Release the reservation only for a certain rejection; returns the audit label."""
+    if not _is_rejection(app, e):
+        return "kept"
+    app.safety.release(spec)
+    return "released"
 
 
 def _country_for_order(symbol: str, currency: "str | None") -> str:
@@ -124,7 +160,7 @@ def _country_for_order(symbol: str, currency: "str | None") -> str:
         return "US"
     if cur == "KRW":
         return "KR"
-    return "US" if symbol.isalpha() else "KR"
+    return "US" if order_currency(symbol) == "USD" else "KR"
 
 
 def _market_gate(app: AppContext, symbol: str,
@@ -241,10 +277,10 @@ def place_order(app: AppContext, *, confirmation_token: str) -> dict:
             )
             result = {"orderId": resp.order_id, "clientOrderId": resp.client_order_id}
     except Exception as e:
-        app.safety.release(spec)
+        reservation = _settle_failure(app, spec, e)
         app.audit.record({
             "tool": "place_order", "mode": app.config.mode, "decision": "error",
-            "error": str(e), "clientOrderId": spec.client_order_id,
+            "error": str(e), "clientOrderId": spec.client_order_id, "reservation": reservation,
         })
         raise  # token NOT committed -> idempotent retry reuses same clientOrderId
 
@@ -314,11 +350,11 @@ def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
             confirm_high_value_order=spec.confirm_high_value_order,
         )
     except Exception as e:
-        app.safety.release(spec)
+        reservation = _settle_failure(app, spec, e)
         app.audit.record({
             "tool": "modify_order", "mode": app.config.mode, "decision": "error",
             "error": str(e), "orderId": spec.modify_order_id,
-            "clientOrderId": spec.client_order_id,
+            "clientOrderId": spec.client_order_id, "reservation": reservation,
         })
         raise
 

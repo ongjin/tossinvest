@@ -99,7 +99,9 @@ class RedisSpendStore:
             cur = to_decimal(self._r.get(self._spend_key(day, currency)) or "0")
             if cur + delta > cap:
                 return False
-            self._r.set(self._spend_key(day, currency), str(cur + delta), ex=self._ttl)
+            # floored: a downsize of an order never counted here must not bank credit under the cap
+            new = max(Decimal("0"), cur + delta)
+            self._r.set(self._spend_key(day, currency), str(new), ex=self._ttl)
             self._r.sadd(self._reserved_key(day), dedup_key)
             self._r.expire(self._reserved_key(day), self._ttl)
             return True

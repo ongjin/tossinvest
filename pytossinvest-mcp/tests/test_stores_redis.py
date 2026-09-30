@@ -71,3 +71,12 @@ def test_two_managers_share_token(r):
     # instance B can consume the token instance A issued
     got = b.consume(token)
     assert got.client_order_id == spec.client_order_id
+
+
+def test_spend_negative_delta_floors_at_zero(r):
+    s = RedisSpendStore(r)
+    # modify-downsize of an order this server never counted (e.g. placed in the Toss app)
+    assert s.reserve("d", "KRW", Decimal("-500"), Decimal("1000"), "m1") is True
+    assert s.current("d", "KRW") == Decimal("0")
+    # the credit must not widen today's cap
+    assert s.reserve("d", "KRW", Decimal("1200"), Decimal("1000"), "c1") is False

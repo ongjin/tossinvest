@@ -33,6 +33,12 @@ def test_bearer_allows_correct_token():
     assert r.text == "ok"
 
 
+def test_bearer_rejects_non_ascii_token_with_401():
+    client = TestClient(_guarded_app("secret"), raise_server_exceptions=False)
+    r = client.get("/x", headers={"Authorization": "Bearer s\u00e9cret".encode("utf-8")})
+    assert r.status_code == 401
+
+
 def test_build_http_app_mounts_auth_on_real_mcp_endpoint():
     from mcp.server import MCPServer
     mcp = MCPServer("test")

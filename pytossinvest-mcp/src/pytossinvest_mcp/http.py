@@ -17,12 +17,13 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app, *, token: str) -> None:
         super().__init__(app)
-        self._token = token
+        self._token = token.encode("utf-8")
 
     async def dispatch(self, request: Request, call_next):
         header = request.headers.get("authorization", "")
         scheme, _, presented = header.partition(" ")
-        if scheme.lower() != "bearer" or not hmac.compare_digest(presented, self._token):
+        # compare bytes: compare_digest raises TypeError on non-ASCII str (a 500, not a 401)
+        if scheme.lower() != "bearer" or not hmac.compare_digest(presented.encode("utf-8"), self._token):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
         return await call_next(request)
 

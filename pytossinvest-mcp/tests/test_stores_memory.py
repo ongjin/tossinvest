@@ -60,3 +60,12 @@ def test_spend_seed_is_floored():
     assert s.current("d", "KRW") == Decimal("150")
     s.seed("d", "KRW", Decimal("-1000"))  # floored at 0
     assert s.current("d", "KRW") == Decimal("0")
+
+
+def test_spend_negative_delta_floors_at_zero():
+    s = MemorySpendStore()
+    # modify-downsize of an order this server never counted (e.g. placed in the Toss app)
+    assert s.reserve("d", "KRW", Decimal("-500"), Decimal("1000"), "m1") is True
+    assert s.current("d", "KRW") == Decimal("0")
+    # the credit must not widen today's cap
+    assert s.reserve("d", "KRW", Decimal("1200"), Decimal("1000"), "c1") is False

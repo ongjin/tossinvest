@@ -22,8 +22,10 @@ MAX_ORDER_THRESHOLD_USD = Decimal("3000000")   # $3M: always rejected
 
 
 def order_currency(symbol: str) -> str:
-    """Order currency by symbol shape: alphabetic = USD, numeric = KRW (no FX)."""
-    return "USD" if symbol.isalpha() else "KRW"
+    """Fallback order currency by symbol shape (no FX): KR codes start with a digit, anything
+    else is USD so an unrecognized symbol lands in the USD caps, never the larger KRW numbers."""
+    first = symbol[:1]
+    return "KRW" if first.isascii() and first.isdigit() else "USD"
 
 
 def _canon_symbol(s: str) -> str:
@@ -86,7 +88,7 @@ class SafetyManager:
         spend_store: SpendStore,
     ):
         self._cfg = config
-        self._now = now          # monotonic seconds (token expiry)
+        self._now = now          # epoch seconds (token expiry; stored in redis, so not monotonic)
         self._today = today      # date (daily-cap reset)
         self._gen_id = gen_id or (lambda: uuid.uuid4().hex[:32])
         self.token_store = token_store

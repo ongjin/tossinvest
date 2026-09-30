@@ -140,11 +140,11 @@ docker compose up --build
 
 > 돈 관련 필드(`MAX_ORDER_AMOUNT`·`DAILY_ORDER_LIMIT`·`MAX_ORDER_AMOUNT_USD`·`DAILY_ORDER_LIMIT_USD`)는 float 으로 주면 `TypeError` — 문자열/정수만(JSON/Decimal 안전). `PAPER_STARTING_CASH` 는 **통화별 JSON dict** 문자열(`{"KRW":"10000000","USD":"7000"}`) 또는 스칼라 정수/문자열(`10000000`, `{"KRW": …}` 로 자동 래핑). float·bool 은 거부.
 >
-> **통화 판정**: 심볼이 영문자면 USD(예 `AAPL`), 숫자 코드면 KRW(예 `005930`) 한도·임계로 비교합니다(FX 환산 없음 — 안전 한도가 환율/네트워크에 의존하지 않게).
+> **통화 판정**: 시세 응답의 통화로 한도·임계를 고릅니다. 시세 조회가 실패하면 심볼 모양으로 판정 — 숫자로 시작하면 KRW(예 `005930`·`0101N0`), 그 외는 USD(예 `AAPL`·`BRK.B`)라 모르는 심볼은 작은 USD 한도에 걸립니다(FX 환산 없음 — 안전 한도가 환율/네트워크에 의존하지 않게).
 
 ---
 
-## 14개 툴
+## 15개 툴
 
 입출력의 돈·수량은 **전부 문자열**(JSON/Decimal 안전). 툴 설명(description)에도 string-money / 2단계 주문 / live-only 제약이 명시돼 있어 LLM 이 올바르게 호출합니다.
 
@@ -154,14 +154,15 @@ docker compose up --build
 |---|---|---|
 | `get_accounts` | `()` | 계좌 목록. paper 면 합성 `PAPER` 계좌 반환 |
 | `get_holdings` | `(symbol=None)` | 보유 포지션. paper 면 현금·실현손익·종목. **paper `cash`/`realizedPnl` 은 `{통화: 문자열}` dict(KRW/USD 분리), 종목 항목엔 `currency` 포함** |
+| `get_buying_power` | `(currency=None)` | 현금 매수가능금액(미수 제외). 통화 생략 시 KRW·USD 둘 다. `read_only` 에서도 현금을 보는 경로. 총 예수금은 토스 API 에 없음 |
 | `get_quote` | `(symbols: list)` | 최신가(최대 200종목). **단일 종목이면 호가+체결도 동봉** |
 | `get_candles` | `(symbol, interval, count=100, before=None)` | OHLC 캔들. `interval` 은 `'1m'` 또는 `'1d'` |
 | `get_stock_info` | `(symbols: list)` | 종목 기본정보(최대 200) |
 | `get_market_info` | `(country='KR', base_currency=None, quote_currency=None)` | 시장 캘린더. 통화쌍 주면 환율 동봉 |
-| `list_orders` | `(status='OPEN', symbol=None)` | 미체결 주문(실 API 는 OPEN 만). paper 는 시뮬 주문 |
+| `list_orders` | `(status='OPEN', symbol=None)` | `OPEN`(미체결) 또는 `CLOSED`(체결·취소, 첫 페이지만). paper 는 시뮬 주문 |
 | `get_order` | `(order_id)` | 주문 상세 |
 
-> **시세 툴(`get_quote`·`get_candles`·`get_stock_info`·`get_market_info`)은 모드와 무관하게 항상 실제 client 를 씁니다** — 시세는 계좌와 무관하니까요. 계좌 읽기(`get_accounts`·`get_holdings`·`list_orders`·`get_order`)만 paper 모드에서 시뮬로 라우팅됩니다.
+> **시세 툴(`get_quote`·`get_candles`·`get_stock_info`·`get_market_info`)은 모드와 무관하게 항상 실제 client 를 씁니다** — 시세는 계좌와 무관하니까요. 계좌 읽기(`get_accounts`·`get_holdings`·`get_buying_power`·`list_orders`·`get_order`)만 paper 모드에서 시뮬로 라우팅됩니다.
 
 ### 쓰기 (`read_only` 외 = paper · live)
 
