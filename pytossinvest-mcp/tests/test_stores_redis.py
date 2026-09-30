@@ -114,3 +114,14 @@ def test_token_saved_before_conditional_support_still_loads(r):
     r.set("tok:t3", json.dumps(d))
     got, _, _ = s.get("t3")
     assert got.kind == "order" and got.conditional is None
+
+
+def test_conditional_tokens_live_outside_the_ordinary_key_space(r):
+    # a pre-upgrade build sharing this redis reads "tok:" only; it must not see a conditional
+    # token as an ordinary (possibly MARKET, immediately filled) order
+    s = RedisTokenStore(r)
+    s.put("t4", _conditional_spec(), expires_at=100.0, issued_at=50.0)
+    assert r.get("tok:t4") is None
+    assert s.get("t4")[0].kind == "conditional"
+    s.delete("t4")
+    assert s.get("t4") is None

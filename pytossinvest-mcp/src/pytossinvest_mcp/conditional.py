@@ -6,7 +6,7 @@ modifying run through tools.place_order / tools.modify_order so the safety path 
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from pytossinvest.money import to_decimal
 
@@ -86,9 +86,13 @@ def request_notional(request: dict) -> Decimal:
 
 
 def detail_notional(detail: dict) -> Decimal | None:
-    """Notional of an existing conditional order in the API's detail shape."""
-    return group_notional(detail["type"], detail["quantity"], detail["orderType"],
-                          detail["first"], detail.get("second"))
+    """Notional of an existing conditional order in the API's detail shape. None when it cannot
+    be priced, including an unexpected shape: the caller then counts the full new notional."""
+    try:
+        return group_notional(detail["type"], detail["quantity"], detail["orderType"],
+                              detail["first"], detail.get("second"))
+    except (KeyError, TypeError, AttributeError, InvalidOperation):
+        return None
 
 
 def _require_live(app) -> None:
@@ -193,6 +197,7 @@ def get_conditional_order(app, conditional_order_id: str) -> dict:
 
 def execute_place(app, spec) -> dict:
     """The place_order execution step for a conditional token."""
+    _require_live(app)  # a token issued live must not reach the broker from a paper instance
     return app.client.create_conditional_order(
         symbol=spec.symbol, client_order_id=spec.client_order_id,
         confirm_high_value_order=spec.confirm_high_value_order, **spec.conditional,
@@ -201,6 +206,7 @@ def execute_place(app, spec) -> dict:
 
 def execute_modify(app, spec) -> dict:
     """The modify_order execution step for a conditional modify token (returns a new id)."""
+    _require_live(app)
     return app.client.modify_conditional_order(
         spec.modify_order_id, confirm_high_value_order=spec.confirm_high_value_order,
         **spec.conditional,

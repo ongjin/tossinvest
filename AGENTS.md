@@ -4,7 +4,7 @@
 - **커밋/푸시/머지는 요청 시에만**. 브랜치 전략은 `main` 단일. feature 작업은 `feat/<name>` 브랜치 → 리뷰 후 머지.
 - **돈/수량 float 금지** — 전구간 **문자열/Decimal**. SDK 의 `pytossinvest.money.to_decimal` 이 float 를 `TypeError` 로 거부(강제). MCP 레이어도 입출력 모두 문자열 유지(JSON/Decimal 안전).
 - **SDK 공개 API 깨지 말 것** — `pytossinvest-mcp` 가 `pytossinvest` 에 의존. SDK 시그니처/반환 타입 변경 시 **MCP 테스트도 그린 확인** 후 진행.
-- **`place_order` 안전 불변식 (프로젝트 핵심)** — 체결 경로(`paper.place` / `client.place_order`)는 **반드시 `safety.check_guardrails` 를 거친다**. confirmation 토큰은 `preview_order` 에서만, 가드레일 통과 후 발급. `place_order` 는 `consume(token)` → `check_guardrails(check_daily=False)` → **`reserve`(원자적·`clientOrderId` 멱등성)** → 실행 → **성공 시 `commit`(일일 누적 확정) / 실패 시 `release`(예약 해제, 토큰은 유지 — **체결이 확실히 안 된 실패만**: paper 전부·토스 4xx. 타임아웃·연결끊김·5xx 처럼 체결 여부를 모르면 예약을 유지한다)** → 실패 시 동일 `clientOrderId` 로 멱등 재시도(유지된 예약은 dedup 키로 재사용돼 두 번 세지 않음). 이 불변식을 우회하는 변경 금지. **modify 도 동형 2단계**(`preview_modify`→`modify_order(confirmation_token)`): consume → 가드레일 재검사(**델타 회계** — `check_daily=True, prev_notional=원본명목`, 일일 증분=`new−old`만 검사) → **`reserve(signed delta)`** → 실행 → 성공 시 **`commit`**(델타는 `reserve` 때 이미 0-하한으로 가산) / 실패 시 **`release(delta)`**(place 와 같은 확실한-실패 규칙, 토큰 유지). 우회 금지. **조건주문도 같은 경로**: `preview_conditional_order`/`preview_conditional_modify` 가 `kind="conditional"` 토큰을 발급하고 실행은 기존 `place_order`/`modify_order` 가 **예약 이후 실행 단계에서만** `kind` 로 분기(`conditional.execute_place/execute_modify`) — 조건주문 전용 체결 경로를 따로 만들지 말 것.
+- **`place_order` 안전 불변식 (프로젝트 핵심)** — 체결 경로(`paper.place` / `client.place_order`)는 **반드시 `safety.check_guardrails` 를 거친다**. confirmation 토큰은 `preview_order` 에서만, 가드레일 통과 후 발급. `place_order` 는 `consume(token)` → `check_guardrails(check_daily=False)` → **`reserve`(원자적·`clientOrderId` 멱등성)** → 실행 → **성공 시 `commit`(일일 누적 확정) / 실패 시 `release`(예약 해제, 토큰은 유지 — **체결이 확실히 안 된 실패만**: paper 전부·토스 4xx. 타임아웃·연결끊김·5xx 처럼 체결 여부를 모르면 예약을 유지한다)** → 실패 시 동일 `clientOrderId` 로 멱등 재시도(유지된 예약은 dedup 키로 재사용돼 두 번 세지 않음). 이 불변식을 우회하는 변경 금지. **modify 도 동형 2단계**(`preview_modify`→`modify_order(confirmation_token)`): consume → 가드레일 재검사(**델타 회계** — `check_daily=True, prev_notional=원본명목`, 일일 증분=`new−old`만 검사) → **`reserve(signed delta)`** → 실행 → 성공 시 **`commit`**(델타는 `reserve` 때 이미 0-하한으로 가산) / 실패 시 **`release(delta)`**(place 와 같은 확실한-실패 규칙, 토큰 유지). 우회 금지. **조건주문도 같은 경로**: `preview_conditional_order`/`preview_conditional_modify` 가 `kind="conditional"` 토큰을 발급하고 실행은 기존 `place_order`/`modify_order` 가 **예약 이후 실행 단계에서만** `kind` 로 분기(`conditional.execute_place/execute_modify`) — 조건주문 전용 체결 경로를 따로 만들지 말 것. **토큰 용도 검사**: `place_order` 는 정정 토큰(`modify_order_id` 있음)을, `modify_order` 는 주문 토큰을 `wrong-token` 으로 거부한다 — 정정 토큰은 차액만 예약하므로 `place_order` 로 새 주문을 내면 일일 한도를 우회한다(2026-09-30 리뷰에서 발견, 일반 주문에도 있던 구멍).
 
 # 토스증권 Open API 오픈소스 (pytossinvest + pytossinvest-mcp)
 
@@ -40,7 +40,7 @@ uv sync --package pytossinvest-mcp --extra dev
 
 # 테스트
 uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (68) — respx mock + 로컬 websockets 서버
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (230) — FakeClient
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (243) — FakeClient
 
 # MCP 서버 실행 (stdio — Claude Desktop/Cursor 등 MCP 클라이언트용)
 TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \

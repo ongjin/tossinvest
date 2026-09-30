@@ -65,3 +65,13 @@ def test_detail_notional_is_unknown_without_prices():
               "first": {"type": "PROFIT_RATE", "status": "WATCHING", "triggerPrice": None,
                         "targetProfitRate": "10"}}
     assert detail_notional(detail) is None
+
+
+@pytest.mark.parametrize("detail", [
+    {"type": "SINGLE", "orderType": "LIMIT", "first": {"orderPrice": "1"}},                  # no quantity
+    {"type": "SINGLE", "quantity": 10.5, "orderType": "LIMIT", "first": {"orderPrice": "1"}},  # float
+    {"type": "SINGLE", "quantity": "", "orderType": "LIMIT", "first": {"orderPrice": "1"}},
+    {"type": "SINGLE", "quantity": "10", "orderType": "LIMIT", "first": None},
+])
+def test_detail_notional_is_unknown_for_unexpected_shapes(detail):
+    assert detail_notional(detail) is None   # -> the full new notional is counted

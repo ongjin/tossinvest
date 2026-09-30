@@ -172,10 +172,15 @@ class SafetyManager:
         cfg = self._cfg
         return to_decimal(cfg.daily_order_limit_usd if currency == "USD" else cfg.daily_order_limit)
 
-    def _delta(self, spec: OrderSpec) -> Decimal:
+    def spend_delta(self, spec: OrderSpec) -> Decimal:
+        """What reserve / release move on today's counter. A conditional modify never refunds:
+        the order lives until expire_date and may have been counted on an earlier day."""
         if spec.prev_notional is None:
             return spec.notional
-        return spec.notional - spec.prev_notional
+        delta = spec.notional - spec.prev_notional
+        if spec.kind == CONDITIONAL_KIND:
+            return max(Decimal("0"), delta)
+        return delta
 
     def check_guardrails(
         self, spec: OrderSpec, *, is_market_open: bool, enforce_hours: bool,
@@ -229,14 +234,14 @@ class SafetyManager:
     def reserve(self, spec: OrderSpec) -> bool:
         day = self._today().isoformat()
         return _guard_store(lambda: self.spend_store.reserve(
-            day, spec.currency, self._delta(spec), self._daily_cap(spec.currency),
+            day, spec.currency, self.spend_delta(spec), self._daily_cap(spec.currency),
             spec.client_order_id,
         ))
 
     def release(self, spec: OrderSpec) -> None:
         day = self._today().isoformat()
         _guard_store(lambda: self.spend_store.release(
-            day, spec.currency, self._delta(spec), spec.client_order_id,
+            day, spec.currency, self.spend_delta(spec), spec.client_order_id,
         ))
 
     def issue_token(self, spec: OrderSpec) -> str:

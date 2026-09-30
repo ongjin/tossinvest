@@ -6,7 +6,7 @@ from decimal import Decimal
 from pytossinvest.money import to_decimal
 
 from .paper import PaperState, Position, PaperOrder, _as_cash_dict
-from .safety import ORDER_KIND, OrderSpec
+from .safety import CONDITIONAL_KIND, ORDER_KIND, OrderSpec
 
 
 def _spec_to_dict(spec: OrderSpec) -> dict:
@@ -50,13 +50,16 @@ def _spec_from_dict(d: dict) -> OrderSpec:
 
 
 class RedisTokenStore:
-    def __init__(self, client, *, prefix: str = "tok:", grace_sec: int = 86400):
+    # Conditional tokens get their own key space: a pre-conditional build sharing this redis only
+    # reads the ordinary prefix, and would otherwise run a conditional spec as a plain order.
+    def __init__(self, client, *, prefix: str = "tok:", conditional_prefix: str = "ctok:",
+                 grace_sec: int = 86400):
         self._r = client
-        self._prefix = prefix
+        self._prefixes = {ORDER_KIND: prefix, CONDITIONAL_KIND: conditional_prefix}
         self._grace = grace_sec  # physical TTL; code checks expires_at for logical expiry
 
-    def _key(self, token: str) -> str:
-        return f"{self._prefix}{token}"
+    def _keys(self, token: str) -> list[str]:
+        return [f"{p}{token}" for p in self._prefixes.values()]
 
     def put(self, token: str, spec: OrderSpec, *, expires_at: float, issued_at: float) -> None:
         payload = json.dumps({
@@ -64,17 +67,17 @@ class RedisTokenStore:
             "expires_at": expires_at,
             "issued_at": issued_at,
         })
-        self._r.set(self._key(token), payload, ex=self._grace)
+        self._r.set(f"{self._prefixes[spec.kind]}{token}", payload, ex=self._grace)
 
     def get(self, token: str):
-        raw = self._r.get(self._key(token))
+        raw = next((v for v in (self._r.get(k) for k in self._keys(token)) if v is not None), None)
         if raw is None:
             return None
         d = json.loads(raw)
         return _spec_from_dict(d["spec"]), d["expires_at"], d["issued_at"]
 
     def delete(self, token: str) -> None:
-        self._r.delete(self._key(token))
+        self._r.delete(*self._keys(token))
 
 
 class RedisSpendStore:

@@ -143,3 +143,60 @@ def test_reads_use_the_real_account_outside_paper(app_factory, fake_client):
     C.list_conditional_orders(app, "CLOSED", cursor="c-2")
     assert ("list_conditional_orders", "CLOSED", None, "c-2") in fake_client.calls
     assert C.get_conditional_order(app, "co-1")["status"] == "WATCHING"
+
+
+def test_a_conditional_modify_token_cannot_register_a_new_order(app_factory, fake_client):
+    app = _live(app_factory)
+    pv = C.preview_conditional_modify(app, "co-1", **MODIFY)   # delta 0 -> reserves nothing
+    with pytest.raises(GuardrailError) as e:
+        T.place_order(app, confirmation_token=pv["confirmationToken"])
+    assert e.value.code == "wrong-token"
+    assert not [c for c in fake_client.calls if c[0] == "create_conditional_order"]
+
+
+def test_shrinking_a_conditional_order_refunds_nothing(app_factory, fake_client):
+    # it may have been counted on an earlier day; a shrink-then-cancel would otherwise be a refund
+    app = _live(app_factory)
+    app.safety.spend_store.seed(DAY, "KRW", Decimal("900000"))
+    pv = C.preview_conditional_modify(app, "co-1", **dict(MODIFY, quantity="1"))  # 649,000 -> 64,900
+    T.modify_order(app, confirmation_token=pv["confirmationToken"])
+    assert _spent(app) == Decimal("900000")
+    assert _audit(app, "modified")[-1]["notional"] == "0"
+
+
+def test_a_paper_instance_refuses_a_conditional_token(app_factory, fake_client):
+    # e.g. a live and a paper instance behind one redis, or a live->paper restart within the TTL
+    live = _live(app_factory)
+    pv = C.preview_conditional_order(live, **SINGLE)
+    paper = app_factory(mode="paper")
+    paper.safety = live.safety
+    with pytest.raises(PaperError):
+        T.place_order(paper, confirmation_token=pv["confirmationToken"])
+    assert not [c for c in fake_client.calls if c[0] == "create_conditional_order"]
+
+
+def test_duplicate_on_retry_keeps_the_reservation(app_factory, fake_client):
+    # after a timed-out first attempt that did register, a same-token retry can meet the
+    # one-OCO/OTO-per-symbol rule instead of the idempotent echo
+    from pytossinvest.errors import BusinessRuleError
+    app = _live(app_factory)
+
+    def duplicate(**kwargs):
+        raise BusinessRuleError("duplicate-conditional-order", "", http_status=422)
+    fake_client.create_conditional_order = duplicate
+
+    pv = C.preview_conditional_order(app, **SINGLE)
+    with pytest.raises(BusinessRuleError):
+        T.place_order(app, confirmation_token=pv["confirmationToken"])
+    assert _spent(app) == Decimal("649000")
+
+
+@pytest.mark.parametrize("backend", ["memory", "redis"])
+def test_place_then_modify_through_either_state_backend(app_factory, fake_client, backend):
+    app = app_factory(mode="live", allow_live=True, enforce_market_hours=False, backend=backend)
+    pv = C.preview_conditional_order(app, **SINGLE)
+    T.place_order(app, confirmation_token=pv["confirmationToken"])
+    pm = C.preview_conditional_modify(app, "co-1", **dict(MODIFY, first_trigger_price="70100",
+                                                          first_order_price="70000"))
+    T.modify_order(app, confirmation_token=pm["confirmationToken"])
+    assert _spent(app) == Decimal("700000")   # 649,000 on registration + 51,000 modify delta
