@@ -179,3 +179,7 @@ def test_network_timeouts_reach_the_model(tmp_path):
         asyncio.run(mcp.call_tool("get_holdings", {}))
     assert not isinstance(e.value, UnexpectedToolError)
     assert "timed out" in str(e.value)
+
+
+def test_list_orders_advertises_cursor(tmp_path):
+    assert "cursor" in _props(_build(tmp_path, "read_only"), "list_orders")

@@ -159,7 +159,7 @@ docker compose up --build
 | `get_candles` | `(symbol, interval, count=100, before=None)` | OHLC 캔들. `interval` 은 `'1m'` 또는 `'1d'` |
 | `get_stock_info` | `(symbols: list)` | 종목 기본정보(최대 200) |
 | `get_market_info` | `(country='KR', base_currency=None, quote_currency=None)` | 시장 캘린더. 통화쌍 주면 환율 동봉 |
-| `list_orders` | `(status='OPEN', symbol=None)` | `OPEN`(미체결) 또는 `CLOSED`(체결·취소, 첫 페이지만). paper 는 시뮬 주문 |
+| `list_orders` | `(status='OPEN', symbol=None, cursor=None)` | `OPEN`(미체결, 한 번에 전부) 또는 `CLOSED`(체결·취소, 페이지 단위 — 응답의 `nextCursor` 를 `cursor` 로 넘김). paper 는 시뮬 주문 |
 | `get_order` | `(order_id)` | 주문 상세 |
 
 > **시세 툴(`get_quote`·`get_candles`·`get_stock_info`·`get_market_info`)은 모드와 무관하게 항상 실제 client 를 씁니다** — 시세는 계좌와 무관하니까요. 계좌 읽기(`get_accounts`·`get_holdings`·`get_buying_power`·`list_orders`·`get_order`)만 paper 모드에서 시뮬로 라우팅됩니다.

@@ -163,10 +163,12 @@ def _register_reads(mcp: MCPServer, app: AppContext) -> None:
         return T.get_market_info(app, country, base_currency, quote_currency)
 
     @mcp_tool(name="list_orders",
-              description="Orders by status: OPEN (unfilled) or CLOSED (filled/canceled; first "
-                          "page only). Paper returns simulated orders.")
-    def list_orders(status: OrderStatus = "OPEN", symbol: "str | None" = None) -> dict:
-        return T.list_orders(app, status, symbol)
+              description="Orders by status: OPEN (unfilled, all at once) or CLOSED (filled/"
+                          "canceled, paged: pass the previous nextCursor as cursor while hasNext). "
+                          "Paper returns simulated orders.")
+    def list_orders(status: OrderStatus = "OPEN", symbol: "str | None" = None,
+                    cursor: "str | None" = None) -> dict:
+        return T.list_orders(app, status, symbol, cursor)
 
     @mcp_tool(name="get_order", description="Order detail by id.")
     def get_order(order_id: str) -> dict:
