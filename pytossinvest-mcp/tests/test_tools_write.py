@@ -320,3 +320,23 @@ def test_preview_order_passes_authoritative_currency_to_gate(app_factory, fake_c
                     quantity="1", price="100")
     country = [c for c in fake_client.calls if c[0] == "get_market_calendar"][-1][1]
     assert country == "US"  # numeric symbol but API currency USD -> US hours
+
+
+def test_a_modify_token_cannot_place_a_new_order(app_factory, fake_client):
+    # it reserves only the modify delta, so placing with it would dodge the daily cap
+    app = app_factory(mode="live", allow_live=True, enforce_market_hours=False)
+    pv = T.preview_modify(app, "real-1", order_type="LIMIT", price="71000")
+    with pytest.raises(GuardrailError) as e:
+        T.place_order(app, confirmation_token=pv["confirmationToken"])
+    assert e.value.code == "wrong-token"
+    assert fake_client.place_payloads == []
+    T.modify_order(app, confirmation_token=pv["confirmationToken"])  # still valid where it belongs
+
+
+def test_a_place_token_cannot_modify(app_factory, fake_client):
+    app = app_factory(mode="live", allow_live=True, enforce_market_hours=False)
+    pv = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                         quantity="1", price="70000")
+    with pytest.raises(GuardrailError) as e:
+        T.modify_order(app, confirmation_token=pv["confirmationToken"])
+    assert e.value.code == "wrong-token"

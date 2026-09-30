@@ -92,6 +92,29 @@ class FakeClient:
         self.calls.append(("cancel_order", order_id))
         return {"orderId": "real-3"}
 
+    # conditional orders (live path)
+    def create_conditional_order(self, **kwargs):
+        self.calls.append(("create_conditional_order", kwargs))
+        return {"conditionalOrderId": "co-1", "clientOrderId": kwargs.get("client_order_id")}
+
+    def modify_conditional_order(self, conditional_order_id, **kwargs):
+        self.calls.append(("modify_conditional_order", conditional_order_id, kwargs))
+        return {"conditionalOrderId": "co-2"}
+
+    def cancel_conditional_order(self, conditional_order_id):
+        self.calls.append(("cancel_conditional_order", conditional_order_id))
+
+    def list_conditional_orders(self, status="OPEN", symbol=None, cursor=None, limit=20):
+        self.calls.append(("list_conditional_orders", status, symbol, cursor))
+        return {"conditionalOrders": [], "nextCursor": None, "hasNext": False}
+
+    def get_conditional_order(self, conditional_order_id):
+        self.calls.append(("get_conditional_order", conditional_order_id))
+        return {"conditionalOrderId": conditional_order_id, "type": "SINGLE", "status": "WATCHING",
+                "symbol": "005930", "market": "KR", "quantity": "10", "orderType": "LIMIT",
+                "first": {"type": "STOP", "status": "WATCHING", "triggerPrice": "65000",
+                          "orderPrice": "64900"}}
+
 
 @pytest.fixture
 def fake_client():

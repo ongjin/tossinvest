@@ -17,6 +17,7 @@ from .paper import PaperBroker, PaperError
 from .safety import GuardrailError, SafetyManager
 from .tools import AppContext
 from . import __version__
+from . import conditional as CO
 from . import tools as T
 
 _KST = ZoneInfo("Asia/Seoul")
@@ -96,6 +97,7 @@ OrderType = Literal["LIMIT", "MARKET"]
 TimeInForce = Literal["DAY", "CLS", "OPG"]
 OrderStatus = Literal["OPEN", "CLOSED"]
 Currency = Literal["KRW", "USD"]
+ConditionalType = Literal["SINGLE", "OCO", "OTO"]
 
 
 # Exceptions whose text is written for the model. SDK >= 2.1 hides the text of any other
@@ -174,6 +176,20 @@ def _register_reads(mcp: MCPServer, app: AppContext) -> None:
     def get_order(order_id: str) -> dict:
         return T.get_order(app, order_id)
 
+    @mcp_tool(name="list_conditional_orders",
+              description="Conditional (trigger-price) orders: OPEN (watching/ordering) or CLOSED "
+                          "(completed/expired), paged with nextCursor -> cursor. Includes ones "
+                          "made in other channels such as the app. Paper returns none.")
+    def list_conditional_orders(status: OrderStatus = "OPEN", symbol: "str | None" = None,
+                                cursor: "str | None" = None) -> dict:
+        return CO.list_conditional_orders(app, status, symbol, cursor)
+
+    @mcp_tool(name="get_conditional_order",
+              description="One conditional order by id, with each condition's status and the id "
+                          "of the order it fired, if any.")
+    def get_conditional_order(conditional_order_id: str) -> dict:
+        return CO.get_conditional_order(app, conditional_order_id)
+
 
 def _register_writes(mcp: MCPServer, app: AppContext) -> None:
     mcp_tool = _model_facing_tool(mcp)
@@ -225,6 +241,58 @@ def _register_writes(mcp: MCPServer, app: AppContext) -> None:
               description="Cancel an open order (live only; returns a NEW orderId).")
     def cancel_order(order_id: str) -> dict:
         return T.cancel_order(app, order_id)
+
+    @mcp_tool(name="preview_conditional_order",
+              description="STEP 1 of 2 for a conditional order the broker fires when a trigger "
+                          "price is reached, until expire_date (YYYY-MM-DD). SINGLE = one condition; "
+                          "OCO = two SELL conditions, first fires or second (take-profit above, "
+                          "stop below the current price); OTO = first BUY, then second SELL after "
+                          "it fills. LIMIT needs an order price per condition, MARKET takes none. "
+                          "Validates guardrails and counts the full amount against today's cap; "
+                          "then call place_order with the confirmation_token. live only. "
+                          "Money/quantity are strings.")
+    def preview_conditional_order(symbol: str, type: ConditionalType, quantity: str,
+                                  order_type: OrderType, expire_date: str, first_side: Side,
+                                  first_trigger_price: str, first_order_price: "str | None" = None,
+                                  second_side: Side | None = None,
+                                  second_trigger_price: "str | None" = None,
+                                  second_order_price: "str | None" = None,
+                                  confirm_high_value_order: bool = False) -> dict:
+        return CO.preview_conditional_order(
+            app, symbol=symbol, type=type, quantity=quantity, order_type=order_type,
+            expire_date=expire_date, first_side=first_side,
+            first_trigger_price=first_trigger_price, first_order_price=first_order_price,
+            second_side=second_side, second_trigger_price=second_trigger_price,
+            second_order_price=second_order_price,
+            confirm_high_value_order=confirm_high_value_order,
+        )
+
+    @mcp_tool(name="preview_conditional_modify",
+              description="STEP 1 of 2 to replace a conditional order entirely (same fields as "
+                          "preview_conditional_order, no symbol). The broker cancels and re-creates "
+                          "it, so the result has a NEW id. Counts only the change in amount against "
+                          "today's cap; then call modify_order with the confirmation_token. live only.")
+    def preview_conditional_modify(conditional_order_id: str, type: ConditionalType, quantity: str,
+                                   order_type: OrderType, expire_date: str, first_side: Side,
+                                   first_trigger_price: str, first_order_price: "str | None" = None,
+                                   second_side: Side | None = None,
+                                   second_trigger_price: "str | None" = None,
+                                   second_order_price: "str | None" = None,
+                                   confirm_high_value_order: bool = False) -> dict:
+        return CO.preview_conditional_modify(
+            app, conditional_order_id, type=type, quantity=quantity, order_type=order_type,
+            expire_date=expire_date, first_side=first_side,
+            first_trigger_price=first_trigger_price, first_order_price=first_order_price,
+            second_side=second_side, second_trigger_price=second_trigger_price,
+            second_order_price=second_order_price,
+            confirm_high_value_order=confirm_high_value_order,
+        )
+
+    @mcp_tool(name="cancel_conditional_order",
+              description="Cancel a conditional order that has not fired. live only. Does not "
+                          "refund today's cap.")
+    def cancel_conditional_order(conditional_order_id: str) -> dict:
+        return CO.cancel_conditional_order(app, conditional_order_id)
 
 
 def run_server(settings: Settings, mcp) -> None:

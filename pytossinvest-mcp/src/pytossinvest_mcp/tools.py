@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from .audit import AuditLog
 from .config import Settings
 from .paper import PaperBroker, PaperOrder
-from .safety import GuardrailError, SafetyManager, order_currency
+from .safety import CONDITIONAL_KIND, GuardrailError, SafetyManager, order_currency
 
 _KST = ZoneInfo("Asia/Seoul")
 
@@ -127,12 +127,16 @@ def get_order(app: AppContext, order_id: str) -> dict:
 
 # --- write tools (readiness, preview -> place, modify/cancel) ---
 
-from decimal import Decimal  # noqa: E402  (appended section)
 from http import HTTPStatus  # noqa: E402
 
 from pytossinvest.errors import TossInvestError  # noqa: E402
 from pytossinvest.money import to_decimal  # noqa: E402
 from . import market_hours  # noqa: E402
+
+
+# A 4xx a same-token retry can meet when the first, timed-out attempt did register: Toss may
+# check "one OCO/OTO per symbol" before echoing the idempotent result.
+_RETRY_ECHO_CODES = frozenset({"duplicate-conditional-order"})
 
 
 def _is_rejection(app: AppContext, e: Exception) -> bool:
@@ -142,8 +146,9 @@ def _is_rejection(app: AppContext, e: Exception) -> bool:
     reuses it via the clientOrderId dedup key, a fresh preview counts on top of it)."""
     if app.use_paper:
         return True
-    status = e.http_status if isinstance(e, TossInvestError) else None
-    return status is not None and status < HTTPStatus.INTERNAL_SERVER_ERROR
+    if not isinstance(e, TossInvestError) or e.code in _RETRY_ECHO_CODES:
+        return False
+    return e.http_status is not None and e.http_status < HTTPStatus.INTERNAL_SERVER_ERROR
 
 
 def _settle_failure(app: AppContext, spec, e: Exception) -> str:
@@ -243,12 +248,17 @@ def preview_order(app: AppContext, *, symbol: str, side: str, order_type: str,
 
 def place_order(app: AppContext, *, confirmation_token: str) -> dict:
     spec = app.safety.consume(confirmation_token)  # validates exists + not expired
+    if spec.modify_order_id is not None:  # it reserves only a delta; placing with it dodges the cap
+        raise GuardrailError("wrong-token", "this token is from a modify preview; use modify_order")
     # re-check non-daily guardrails (per-order/high-value/hard-ceiling/deny-allow); daily handled by reserve
     app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
     if not app.safety.reserve(spec):
         raise GuardrailError("daily-limit", "this order would push today's total over the cap")
     try:
-        if app.use_paper:
+        if spec.kind == CONDITIONAL_KIND:
+            from .conditional import execute_place
+            result = execute_place(app, spec)
+        elif app.use_paper:
             if spec.price is not None:
                 fill_price = spec.price
                 qty = spec.quantity
@@ -287,7 +297,7 @@ def place_order(app: AppContext, *, confirmation_token: str) -> dict:
 
     app.safety.commit(confirmation_token)
     app.audit.record({
-        "tool": "place_order", "mode": app.config.mode, "decision": "placed",
+        "tool": "place_order", "mode": app.config.mode, "decision": "placed", "kind": spec.kind,
         "result": result, "clientOrderId": spec.client_order_id,
         "currency": spec.currency, "notional": spec.notional,
     })
@@ -340,16 +350,22 @@ def preview_modify(app: AppContext, order_id: str, *, order_type: str,
 
 def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
     spec = app.safety.consume(confirmation_token)  # validates exists + not expired
+    if spec.modify_order_id is None:
+        raise GuardrailError("wrong-token", "this token is from an order preview; use place_order")
     # re-check non-daily guardrails; daily handled by reserve (reserve uses signed delta via prev_notional)
     app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
     if not app.safety.reserve(spec):
         raise GuardrailError("daily-limit", "this modify would push today's total over the cap")
     try:
-        result = app.client.modify_order(
-            spec.modify_order_id, order_type=spec.order_type,
-            price=spec.price, quantity=spec.quantity,
-            confirm_high_value_order=spec.confirm_high_value_order,
-        )
+        if spec.kind == CONDITIONAL_KIND:
+            from .conditional import execute_modify
+            result = execute_modify(app, spec)
+        else:
+            result = app.client.modify_order(
+                spec.modify_order_id, order_type=spec.order_type,
+                price=spec.price, quantity=spec.quantity,
+                confirm_high_value_order=spec.confirm_high_value_order,
+            )
     except Exception as e:
         reservation = _settle_failure(app, spec, e)
         app.audit.record({
@@ -360,9 +376,9 @@ def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
         raise
 
     app.safety.commit(confirmation_token)
-    delta = spec.notional - (spec.prev_notional or Decimal("0"))
+    delta = app.safety.spend_delta(spec)
     app.audit.record({
-        "tool": "modify_order", "mode": app.config.mode, "decision": "modified",
+        "tool": "modify_order", "mode": app.config.mode, "decision": "modified", "kind": spec.kind,
         "orderId": spec.modify_order_id, "result": result,
         "clientOrderId": spec.client_order_id,
         "notional": delta, "currency": spec.currency,
