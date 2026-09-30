@@ -127,7 +127,6 @@ def get_order(app: AppContext, order_id: str) -> dict:
 
 # --- write tools (readiness, preview -> place, modify/cancel) ---
 
-from decimal import Decimal  # noqa: E402  (appended section)
 from http import HTTPStatus  # noqa: E402
 
 from pytossinvest.errors import TossInvestError  # noqa: E402
