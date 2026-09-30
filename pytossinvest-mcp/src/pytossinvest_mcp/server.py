@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+import httpx
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pytossinvest.errors import TossInvestError
@@ -99,7 +100,8 @@ Currency = Literal["KRW", "USD"]
 
 # Exceptions whose text is written for the model. SDK >= 2.1 hides the text of any other
 # exception ("Error executing tool <name>"), which would swallow guardrail/Toss reasons.
-_MODEL_FACING_ERRORS = (GuardrailError, PaperError, TossInvestError, ValueError)
+# httpx errors are included so a timed-out place/modify reads as retryable with its token.
+_MODEL_FACING_ERRORS = (GuardrailError, PaperError, TossInvestError, ValueError, httpx.HTTPError)
 
 
 def _model_facing(fn):

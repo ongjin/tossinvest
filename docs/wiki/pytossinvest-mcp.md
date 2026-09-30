@@ -7,7 +7,7 @@
 LLM(Claude Desktop/Cursor 등)에 토스 계좌 읽기/거래를 **안전하게** 쥐여주는 MCP 서버. **Apache-2.0**. `pytossinvest` SDK 의존. **stdio**(기본) 또는 **http** 트랜스포트.
 
 - 위치: `pytossinvest-mcp/src/pytossinvest_mcp/`
-- 테스트: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests` (FakeClient + paper 엔진, 194개, **라이브 키 불필요**)
+- 테스트: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests` (FakeClient + paper 엔진, 195개, **라이브 키 불필요**)
 - 의존: `mcp>=2.0.0,<3`(SDK v2 `MCPServer`, lock 2.2.0 — 2.1 부터 도구 예외 은닉, 아래 함정), `pydantic-settings`(직접 의존 — v2 부터 `mcp` 가 안 끌고 옴), `pytossinvest`. 옵션 extra: `redis = ["redis>=5"]`(HA 백엔드), `http = ["uvicorn>=0.30"]`(http 트랜스포트). dev extra: `fakeredis[lua]>=2`(테스트).
 
 ## 🔒 안전 불변식 (이 프로젝트의 핵심 — 절대 깨지 말 것)
@@ -169,7 +169,7 @@ transport는 `stdio`(기본, 단일 클라이언트) 또는 `http`(원격 다중
 - **market_hours US 자정넘김** — 미국장 KST 표기는 23:30→06:00 처럼 wrap. `start>end` 면 `now>=start or now<end`. 깨진 시간 문자열은 "닫힘"(safe).
 - **테스트 import** — `from conftest import FakeClient` (pytest 가 `tests/` 를 sys.path 에). `from tests.conftest` 는 `tests` 패키지 없어 깨짐.
 - **call_tool 반환 형식 의존 금지** — MCP 버전마다 다름. 서버 테스트는 `list_tools()`(이름)로 검증, 동작은 `tools.py` 함수 직접 호출로 검증. 예외: `test_domain_errors_reach_the_model` 은 `call_tool` 이 `ToolError`(≠`UnexpectedToolError`)를 던지는지로 **SDK 의 예외 가시성 계약**을 고정한다.
-- **도구 예외 은닉(mcp ≥2.1)** — SDK 가 `ToolError`/`MCPError` 가 아닌 예외를 crash 로 보고 모델엔 `Error executing tool <name>` 만 보낸다. 2.0.0 → 2.2.0 을 그냥 올리면 `daily-limit` 같은 거부 사유가 사라지는 걸 테스트로 확인했다. `server._model_facing_tool(mcp)` 가 돌려주는 `mcp_tool` 데코레이터가 `_MODEL_FACING_ERRORS`(`GuardrailError`·`PaperError`·`TossInvestError`·`ValueError`)를 `ToolError(str(e))` 로 바꿔 올린다(`functools.wraps` 라 입력 스키마 불변). 그 밖의 예외는 SDK 기본대로 숨김.
+- **도구 예외 은닉(mcp ≥2.1)** — SDK 가 `ToolError`/`MCPError` 가 아닌 예외를 crash 로 보고 모델엔 `Error executing tool <name>` 만 보낸다. 2.0.0 → 2.2.0 을 그냥 올리면 `daily-limit` 같은 거부 사유가 사라지는 걸 테스트로 확인했다. `server._model_facing_tool(mcp)` 가 돌려주는 `mcp_tool` 데코레이터가 `_MODEL_FACING_ERRORS`(`GuardrailError`·`PaperError`·`TossInvestError`·`ValueError`·`httpx.HTTPError`)를 `ToolError(str(e))` 로 바꿔 올린다(`functools.wraps` 라 입력 스키마 불변). 그 밖의 예외는 SDK 기본대로 숨김.
 - **통화 판정 — 권위 통화 + 폴백(C1)** — `preview_order`/`preview_modify` 는 `_price_and_currency(app, symbol)` 로 `get_prices([symbol])` 한 번을 호출해 `Price.currency`(권위 통화)를 얻고 `build_spec(currency=…)` 로 주입. 조회 실패·빈 결과·공백 통화면 `order_currency(symbol)` 폴백(숫자로 시작→KRW, 그 외→USD — 틀려도 한도가 작은 USD 쪽). 예전 `isalpha()` 폴백은 `BRK.B`·`BF-B` 를 KRW 로 봐 USD 주문에 KRW 숫자 한도(주문당 1,000,000)를 적용하던 구멍이었다(2026-09-30 수정). `order_currency` 자체는 폴백 경로로만 남음. FX 환산 없음. KRW/USD 버킷 분리 유지. **이 권위 통화는 장시간 게이트 국가 판정에도 재사용**(`_market_gate`→`_country_for_order`) — 가드레일 통화와 미장/한국장 판정이 동일 소스. 통화가 없을 때만 `_country_for_order` 가 같은 `order_currency` 로 폴백.
 - **M1 modify 델타 회계** — `preview_modify`·`modify_order` 는 `check_daily=True, prev_notional=원본명목` 으로 호출 — 일일 버킷은 증분(`new−old`)만 검사·가산, per-order·고액·하드실링은 전액 검사. 성공 시 `commit(token)`. SpendStore `reserve` 가 **0-하한**이라 카운트 안 된 주문의 다운사이즈가 음수 credit 으로 한도를 넓히지 못한다(2026-09-30 전엔 `release`·`seed` 만 하한이었다). 하한에 걸린 예약의 `release` 는 실제 반영분보다 크게 되돌린다(보수적 과다계상). 부팅복원도 `placed`+`modified` 델타 합산 후 0-하한.
 - **부팅 복원(UTC ts → KST 날짜)** — `restore_spend` 는 감사 이벤트의 `ts`(UTC ISO) 를 `datetime.fromisoformat(ts).astimezone(_KST).date()` 로 변환해 오늘 KST 날짜와 비교. `placed` 와 `modified` 이벤트의 `notional`·`currency` 를 합산한 뒤 통화별 0-하한 적용. 파싱 실패·dict 가 아닌 이벤트·`notional`/`ts` 필드 누락은 건너뜀(손상 감사 파일 있어도 서버 부팅 불가 없음). 감사 파일을 지우면 당일 누적도 0으로 리셋된다(주의).
