@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from .audit import AuditLog
 from .config import Settings
 from .paper import PaperBroker, PaperOrder
-from .safety import GuardrailError, SafetyManager, order_currency
+from .safety import CONDITIONAL_KIND, GuardrailError, SafetyManager, order_currency
 
 _KST = ZoneInfo("Asia/Seoul")
 
@@ -248,7 +248,10 @@ def place_order(app: AppContext, *, confirmation_token: str) -> dict:
     if not app.safety.reserve(spec):
         raise GuardrailError("daily-limit", "this order would push today's total over the cap")
     try:
-        if app.use_paper:
+        if spec.kind == CONDITIONAL_KIND:
+            from .conditional import execute_place
+            result = execute_place(app, spec)
+        elif app.use_paper:
             if spec.price is not None:
                 fill_price = spec.price
                 qty = spec.quantity
@@ -287,7 +290,7 @@ def place_order(app: AppContext, *, confirmation_token: str) -> dict:
 
     app.safety.commit(confirmation_token)
     app.audit.record({
-        "tool": "place_order", "mode": app.config.mode, "decision": "placed",
+        "tool": "place_order", "mode": app.config.mode, "decision": "placed", "kind": spec.kind,
         "result": result, "clientOrderId": spec.client_order_id,
         "currency": spec.currency, "notional": spec.notional,
     })
@@ -345,11 +348,15 @@ def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
     if not app.safety.reserve(spec):
         raise GuardrailError("daily-limit", "this modify would push today's total over the cap")
     try:
-        result = app.client.modify_order(
-            spec.modify_order_id, order_type=spec.order_type,
-            price=spec.price, quantity=spec.quantity,
-            confirm_high_value_order=spec.confirm_high_value_order,
-        )
+        if spec.kind == CONDITIONAL_KIND:
+            from .conditional import execute_modify
+            result = execute_modify(app, spec)
+        else:
+            result = app.client.modify_order(
+                spec.modify_order_id, order_type=spec.order_type,
+                price=spec.price, quantity=spec.quantity,
+                confirm_high_value_order=spec.confirm_high_value_order,
+            )
     except Exception as e:
         reservation = _settle_failure(app, spec, e)
         app.audit.record({
@@ -362,7 +369,7 @@ def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
     app.safety.commit(confirmation_token)
     delta = spec.notional - (spec.prev_notional or Decimal("0"))
     app.audit.record({
-        "tool": "modify_order", "mode": app.config.mode, "decision": "modified",
+        "tool": "modify_order", "mode": app.config.mode, "decision": "modified", "kind": spec.kind,
         "orderId": spec.modify_order_id, "result": result,
         "clientOrderId": spec.client_order_id,
         "notional": delta, "currency": spec.currency,
