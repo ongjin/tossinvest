@@ -13,8 +13,8 @@
 ## Tech Stack
 
 - **Runtime**: Python 3.12, **uv 워크스페이스** 모노레포 (hatchling build)
-- **`pytossinvest`** (SDK, **MIT**): `httpx`(sync) + `pydantic` v2. 토큰매니저·그룹별 레이트리미터·decimal-safe money·code 기반 에러·22 엔드포인트(조건주문 5 포함) + 실시간 스트림 `pytossinvest.stream`(선택 의존성 `websockets`, `[ws]` extra).
-- **`pytossinvest-mcp`** (MCP 서버, **Apache-2.0**, SDK 의존): `mcp>=2.0.0,<3`(lock 2.2.0, SDK v2 `MCPServer` — 2026-07-28 스펙, stdio) + `pydantic-settings`. 안전모델(모드·가드레일·preview/confirm·멱등성·감사로그) + 20 툴(조건주문 5 포함).
+- **`pytossinvest`** (SDK, **MIT**): `httpx`(sync) + `pydantic` v2. 토큰매니저·그룹별 레이트리미터·decimal-safe money·code 기반 에러·32 엔드포인트(API 1.2.19 REST 전부 — 조건주문 5·수급 5·랭킹·시장지표 3·전종목 포함) + 실시간 스트림 `pytossinvest.stream`(선택 의존성 `websockets`, `[ws]` extra).
+- **`pytossinvest-mcp`** (MCP 서버, **Apache-2.0**, SDK 의존): `mcp>=2.0.0,<3`(lock 2.2.0, SDK v2 `MCPServer` — 2026-07-28 스펙, stdio) + `pydantic-settings`. 안전모델(모드·가드레일·preview/confirm·멱등성·감사로그) + 24 툴(조건주문 5·시장데이터 4 포함).
 - **테스트**: `pytest`. SDK 는 `respx` 로 httpx mock, MCP 는 `FakeClient` + paper 엔진 — **라이브 키 불필요, 네트워크 0**.
 
 ## Project Structure
@@ -39,8 +39,8 @@ toss/
 uv sync --package pytossinvest-mcp --extra dev
 
 # 테스트
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (68) — respx mock + 로컬 websockets 서버
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (245) — FakeClient
+uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (79) — respx mock + 로컬 websockets 서버
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (256) — FakeClient
 
 # MCP 서버 실행 (stdio — Claude Desktop/Cursor 등 MCP 클라이언트용)
 TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
@@ -85,7 +85,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 **living (docs/wiki/ — 코드 만지기 전 읽고, 만진 뒤 갱신):**
 - [docs/wiki/tossinvest-open-api.md](docs/wiki/tossinvest-open-api.md) — **토스 Open API 레퍼런스 (외부 스펙)**. 인증 2단(`X-Tossinvest-Account`)·엔드포인트 전체·요청/응답 스키마·enum·rate limit 10그룹·에러코드 전체표·주문 함정(멱등성 10분·고액확인·US 금액주문·OrderStatus 10종). 외부 API 사실관계가 필요할 때.
 - [docs/wiki/pytossinvest-sdk.md](docs/wiki/pytossinvest-sdk.md) — **SDK 내부구조**. 공개 API 표면(클라이언트·에러·모델·money), `_request` 오케스트레이션(언래핑·계좌헤더·401재시도·레이트게이트·헤더동기화·429재시도), 모듈별 책임·함정·레이트리밋/재시도 동작(v0.0.2), 새 엔드포인트 추가 절차. `pytossinvest/` 코드 만질 때.
-- [docs/wiki/pytossinvest-mcp.md](docs/wiki/pytossinvest-mcp.md) — **MCP 내부구조 + 안전 불변식**. 3모드 라우팅표, 가드레일 순서(통화별 임계), preview→place/modify 토큰 생애·멱등성, 20툴(조건주문), 모듈별 함정(paper 즉시체결·MARKET 무가격·US 자정넘김·conftest import·통화판정·M1 modify·부팅복원), 새 툴 추가 절차. `pytossinvest-mcp/` 코드 만질 때.
+- [docs/wiki/pytossinvest-mcp.md](docs/wiki/pytossinvest-mcp.md) — **MCP 내부구조 + 안전 불변식**. 3모드 라우팅표, 가드레일 순서(통화별 임계), preview→place/modify 토큰 생애·멱등성, 24툴(조건주문·시장데이터), 모듈별 함정(paper 즉시체결·MARKET 무가격·US 자정넘김·conftest import·통화판정·M1 modify·부팅복원), 새 툴 추가 절차. `pytossinvest-mcp/` 코드 만질 때.
 
 **design history (docs/superpowers/ — 왜 이렇게 만들었나):**
 - [docs/superpowers/specs/2026-06-17-tossinvest-mcp-design.md](docs/superpowers/specs/2026-06-17-tossinvest-mcp-design.md) — **설계 확정본**. 모드 3단계·안전모델(§3)·툴 매핑(§4)·크로스커팅 인프라(§5)·테스트 전략(§6)·규제 메모(§7)·라이선스(§9).

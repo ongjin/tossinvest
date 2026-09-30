@@ -21,11 +21,11 @@
 | | |
 |---|---|
 | 💸 **돈은 절대 float 가 아니다** | 금액·수량 전구간 문자열/`Decimal`. `float` 은 들어오는 순간 `TypeError` — 부동소수 반올림으로 1원도 안 틀어집니다. |
-| 🚦 **클라이언트단 레이트리미터** | 10개 그룹별 토큰버킷이 요청 속도를 조절. **09:00–09:10 KST 개장 동시호가 10분간 ORDER/ORDER_INFO 반토막**(6→3) 반영. |
+| 🚦 **클라이언트단 레이트리미터** | 17개 그룹별 토큰버킷이 요청 속도를 조절. **09:00–09:10 KST 개장 동시호가 10분간 ORDER/ORDER_INFO 반토막**(6→3) 반영. |
 | 🔁 **멱등성** | `clientOrderId` 로 중복주문 방지 — 네트워크 단절로 응답을 못 받아도 같은 키로 재시도하면 두 번 체결되지 않음(서버측 ~10분 유효). |
 | 🧩 **에러는 `code` 로 분기** | `message` 가 비어도 OK. 서버가 **모르는 code/enum 을 추가해도 안 깨짐**(관용적 파싱). |
 | 🔐 **토큰 생애주기** | 만료 30초 전까지 메모리 캐싱·자동 갱신(`expires_in` 이 30초 이하라도 과거 시각으로 뭉개지지 않게 `max(0, …)` 클램프), `401 expired-token`·`token-revoked`(같은 키로 다른 프로세스가 토큰을 받으면 이전 토큰 무효) 시 1회 재발급 후 재시도. |
-| ✅ **라이브 키 없이 그린** | `pytest` → **68개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
+| ✅ **라이브 키 없이 그린** | `pytest` → **79개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
 
 ---
 
@@ -125,6 +125,12 @@ TossInvestClient(
 | `get_stocks(symbols: list[str])` | `list` | `STOCK` |
 | `get_exchange_rate(base, quote)` | `dict` | `MARKET_INFO` |
 | `get_market_calendar(country, date=None)` | `dict` | `MARKET_INFO` |
+| `get_all_stocks(market, *, status=None, security_type=None, common_share=None)` | `list` · 시장 전체 | `STOCK_ALL` |
+| `get_investor_trading(symbol, count=10, until=None)` · `get_program_trades` · `get_short_selling` · `get_credit_trades` · `get_securities_lending` | `dict` · 국내 수급, 최신순, `until=nextUntil` 로 과거 | `STOCK_TRADING_TREND` |
+| `get_rankings(type, market_country, duration, *, exclude_investment_caution=False, count=100)` | `dict` | `RANKING` |
+| `get_indicator_prices(symbols)` | `list` · KOSPI·KOSDAQ·국채금리 | `MARKET_INDICATOR` |
+| `get_indicator_candles(symbol, interval, count=100, before=None)` | `dict` | `MARKET_INDICATOR_CHART` |
+| `get_index_investor_trading(symbol, interval, count=10, until=None)` | `dict` · KOSPI·KOSDAQ 투자자별 매매대금 | `MARKET_INDICATOR` |
 
 **계좌 / 자산 / 주문 (계좌 헤더 `X-Tossinvest-Account` 자동 부착)**
 
@@ -230,6 +236,9 @@ decimal_to_str(Decimal("70000.50"))  # "70000.50"  — 지수표기 방지(forma
 | `STOCK` | 5 | `ORDER_HISTORY` | 5 |
 | `MARKET_INFO` | 3 | `ORDER_INFO` | 6 |
 | `CONDITIONAL_ORDER` | 5 | `CONDITIONAL_ORDER_HISTORY` | 10 |
+| `STOCK_ALL` | 1 | `STOCK_TRADING_TREND` | 10 |
+| `RANKING` | 5 | `MARKET_INDICATOR` | 10 |
+| `MARKET_INDICATOR_CHART` | 5 | | |
 
 **피크 반토막**: `PEAK_GROUPS = {ORDER, ORDER_INFO}` 는 09:00–09:10 KST 개장 동시호가 동안 TPS 가 절반(6→3)으로 떨어집니다. 단, 서버 응답 헤더(`X-RateLimit-*`)를 한 번이라도 받은 그룹은 이후 피크반토막 미적용 — 헤더가 진실. 버킷이 요청 속도를 조절(pacing)하며, 서버가 `429` 를 주면 자동으로 재시도합니다(`max_retries=3`, 백오프+jitter). 재시도 소진 시 `RateLimitError` 로 표면화됩니다.
 
@@ -278,7 +287,7 @@ except BusinessRuleError as e:
 ## 테스트
 
 ```bash
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 68 passing
+uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 79 passing
 ```
 
 `respx` 로 httpx 를 mock 합니다 — **라이브 키 불필요, 네트워크 0**. `git clone && uv sync && pytest` 면 그린.
