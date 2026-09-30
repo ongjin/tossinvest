@@ -19,7 +19,8 @@ classifiers = [
 dependencies = ["httpx>=0.27", "pydantic>=2.7"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "respx>=0.21"]
+ws = ["websockets>=14"]
+dev = ["pytest>=8", "respx>=0.21", "websockets>=14"]
 
 [project.urls]
 Homepage = "https://github.com/ongjin/tossinvest"

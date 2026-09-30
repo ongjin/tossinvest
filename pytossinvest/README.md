@@ -24,8 +24,8 @@
 | 🚦 **클라이언트단 레이트리미터** | 10개 그룹별 토큰버킷이 요청 속도를 조절. **09:00–09:10 KST 개장 동시호가 10분간 ORDER/ORDER_INFO 반토막**(6→3) 반영. |
 | 🔁 **멱등성** | `clientOrderId` 로 중복주문 방지 — 네트워크 단절로 응답을 못 받아도 같은 키로 재시도하면 두 번 체결되지 않음(서버측 ~10분 유효). |
 | 🧩 **에러는 `code` 로 분기** | `message` 가 비어도 OK. 서버가 **모르는 code/enum 을 추가해도 안 깨짐**(관용적 파싱). |
-| 🔐 **토큰 생애주기** | 만료 30초 전까지 메모리 캐싱·자동 갱신(`expires_in` 이 30초 이하라도 과거 시각으로 뭉개지지 않게 `max(0, …)` 클램프), `401 expired-token` 시 1회 재발급 후 재시도. |
-| ✅ **라이브 키 없이 그린** | `pytest` → **59개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
+| 🔐 **토큰 생애주기** | 만료 30초 전까지 메모리 캐싱·자동 갱신(`expires_in` 이 30초 이하라도 과거 시각으로 뭉개지지 않게 `max(0, …)` 클램프), `401 expired-token`·`token-revoked`(같은 키로 다른 프로세스가 토큰을 받으면 이전 토큰 무효) 시 1회 재발급 후 재시도. |
+| ✅ **라이브 키 없이 그린** | `pytest` → **68개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
 
 ---
 
@@ -34,13 +34,14 @@
 ```bash
 # PyPI (정식 오픈 후)
 pip install pytossinvest
+pip install "pytossinvest[ws]"   # 실시간 WebSocket 스트림까지
 
 # 소스에서 (uv 워크스페이스 모노레포)
 git clone <repo> && cd toss
 uv sync --package pytossinvest --extra dev
 ```
 
-요구사항: **Python 3.12+**. 의존성은 `httpx`(sync) + `pydantic` v2 뿐.
+요구사항: **Python 3.12+**. 의존성은 `httpx`(sync) + `pydantic` v2 뿐. 실시간 스트림(`pytossinvest.stream`)만 선택 의존성 `websockets`(`[ws]` extra).
 
 ---
 
@@ -152,6 +153,43 @@ modify_order(order_id, *, order_type,
 cancel_order(order_id) -> dict
 ```
 
+**조건주문 (계좌 헤더)** — 감시가 도달 시 주문이 자동 생성됩니다. `first`/`second` 는 API 형태 그대로 `{"orderSide", "triggerPrice", "orderPrice"?}`(가격은 문자열).
+
+```python
+create_conditional_order(*, symbol, type, quantity, order_type, expire_date,
+                         first, second=None, client_order_id=None,
+                         confirm_high_value_order=False) -> dict   # type: SINGLE | OCO | OTO
+
+modify_conditional_order(conditional_order_id, *, type, quantity, order_type,
+                         expire_date, first, second=None,
+                         confirm_high_value_order=False) -> dict   # 전체 재설정, 새 id 반환
+
+cancel_conditional_order(conditional_order_id) -> None             # 204
+list_conditional_orders(status="OPEN", symbol=None, cursor=None, limit=20) -> dict
+get_conditional_order(conditional_order_id) -> dict
+```
+
+> 조건주문 목록에는 앱 등 다른 채널에서 만든 조건주문도 섞여 나옵니다.
+
+**실시간 스트림** (`pip install "pytossinvest[ws]"`) — 구독은 선언형이라 `subscribe()` 한 번이 구독 전체를 바꿉니다(`[]` = 전체 해제). 60초마다 `PING` keepalive 를 알아서 보냅니다.
+
+```python
+import asyncio
+from pytossinvest import TossInvestClient
+from pytossinvest.stream import TossInvestStream
+
+async def main():
+    client = TossInvestClient(CLIENT_ID, CLIENT_SECRET)
+    async with TossInvestStream(client) as stream:
+        await stream.subscribe([{"type": "trade:kr", "codes": ["005930"]}])
+        async for frame in stream:   # subscriptions / message / error (pong 은 걸러짐)
+            print(frame)
+
+asyncio.run(main())
+```
+
+> `personal:order` 채널의 codes 는 `str(account.account_seq)`. 이 채널은 한 연결 안에서만 유실이 없으니 재연결 뒤엔 `list_orders` 로 다시 맞추세요.
+
 > **타입화 설계**: 코어 엔드포인트(accounts/prices/buying-power/orders)는 검증된 **pydantic 모델**을 반환하고, 얇은 엔드포인트(holdings/candles/stocks/orderbook/trades/…)는 **언래핑된 `result`**(dict/list)를 그대로 반환합니다. TODO 가 아니라 의도된 절충입니다 — 변동이 잦은 응답은 강타입을 강요하지 않습니다.
 
 ---
@@ -162,9 +200,9 @@ cancel_order(order_id) -> dict
 
 1. **레이트 게이트** — 해당 그룹 토큰버킷에서 토큰을 얻을 때까지 `sleep`. 피크시간(09:00–09:10 KST)엔 ORDER/ORDER_INFO 버킷을 반토막(단, 해당 그룹이 응답 헤더를 한 번이라도 받은 뒤엔 피크반토막 미적용).
 2. **인증** — `Authorization: Bearer {token}` (TokenManager 가 캐싱·갱신).
-3. **계좌 헤더** — `account=True` 엔드포인트는 `X-Tossinvest-Account: {accountSeq}` 부착. `accountSeq` 가 없으면 `RuntimeError` → **`get_accounts()` 를 먼저 호출**해야 합니다.
-4. **버킷 동기화 + 언래핑** — 응답을 받으면 (상태코드 무관) 헤더로 버킷 동기화. 이어 `200` 이면 `resp.json()["result"]` 를 반환(토큰 엔드포인트 제외). 바디가 **비-JSON·과도하게 중첩된 JSON(`RecursionError`)이거나 `result` 키가 없으면** `TossInvestError`(`invalid-response` / `missing-result`)로 거부 — `None` 을 조용히 순회하다 `TypeError` 로 깨지지 않게.
-5. **401 재시도** — `code == "expired-token"` 이면 토큰을 무효화하고 **1회** 재발급 후 재시도(429 카운터 보존).
+3. **계좌 헤더** — `account=True` 엔드포인트는 `X-Tossinvest-Account: {accountSeq}` 부착. `accountSeq` 가 아직 없으면 **첫 호출이 알아서 `get_accounts()` 로 첫 계좌를 캐싱**합니다(계좌가 없을 때만 `RuntimeError`).
+4. **버킷 동기화 + 언래핑** — 응답을 받으면 (상태코드 무관) 헤더로 버킷 동기화. 이어 `200` 이면 `resp.json()["result"]` 를 반환(토큰 엔드포인트 제외), `204`(조건주문 취소)는 `None`. 바디가 **비-JSON·과도하게 중첩된 JSON(`RecursionError`)이거나 `result` 키가 없으면** `TossInvestError`(`invalid-response` / `missing-result`)로 거부 — `None` 을 조용히 순회하다 `TypeError` 로 깨지지 않게.
+5. **401 재시도** — `code` 가 `expired-token` 또는 `token-revoked` 면 토큰을 무효화하고 **1회** 재발급 후 재시도(429 카운터 보존). 토스는 client 당 유효 토큰이 1개라, 같은 키를 쓰는 다른 프로세스가 토큰을 받으면 이쪽 토큰이 `token-revoked` 가 됩니다.
 6. **429 bounded 재시도** — 잔여 시도 횟수가 있으면 `backoff_wait`(`Retry-After` 헤더가 있으면 그 값, 없으면 지수백오프+jitter) 만큼 sleep 후 같은 요청을 재시도. `max_retries` 소진 시 `RateLimitError` 던짐. **5xx·타임아웃은 재시도 안 함**.
 7. 그 외 비2xx → `code` 기반 예외로 변환해 raise.
 
@@ -191,6 +229,7 @@ decimal_to_str(Decimal("70000.50"))  # "70000.50"  — 지수표기 방지(forma
 | `ASSET` | 5 | `ORDER` | 6 |
 | `STOCK` | 5 | `ORDER_HISTORY` | 5 |
 | `MARKET_INFO` | 3 | `ORDER_INFO` | 6 |
+| `CONDITIONAL_ORDER` | 5 | `CONDITIONAL_ORDER_HISTORY` | 10 |
 
 **피크 반토막**: `PEAK_GROUPS = {ORDER, ORDER_INFO}` 는 09:00–09:10 KST 개장 동시호가 동안 TPS 가 절반(6→3)으로 떨어집니다. 단, 서버 응답 헤더(`X-RateLimit-*`)를 한 번이라도 받은 그룹은 이후 피크반토막 미적용 — 헤더가 진실. 버킷이 요청 속도를 조절(pacing)하며, 서버가 `429` 를 주면 자동으로 재시도합니다(`max_retries=3`, 백오프+jitter). 재시도 소진 시 `RateLimitError` 로 표면화됩니다.
 
@@ -239,7 +278,7 @@ except BusinessRuleError as e:
 ## 테스트
 
 ```bash
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 59 passing
+uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 68 passing
 ```
 
 `respx` 로 httpx 를 mock 합니다 — **라이브 키 불필요, 네트워크 0**. `git clone && uv sync && pytest` 면 그린.

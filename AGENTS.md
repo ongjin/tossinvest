@@ -13,7 +13,7 @@
 ## Tech Stack
 
 - **Runtime**: Python 3.12, **uv 워크스페이스** 모노레포 (hatchling build)
-- **`pytossinvest`** (SDK, **MIT**): `httpx`(sync) + `pydantic` v2. 토큰매니저·그룹별 레이트리미터·decimal-safe money·code 기반 에러·17 엔드포인트.
+- **`pytossinvest`** (SDK, **MIT**): `httpx`(sync) + `pydantic` v2. 토큰매니저·그룹별 레이트리미터·decimal-safe money·code 기반 에러·22 엔드포인트(조건주문 5 포함) + 실시간 스트림 `pytossinvest.stream`(선택 의존성 `websockets`, `[ws]` extra).
 - **`pytossinvest-mcp`** (MCP 서버, **Apache-2.0**, SDK 의존): `mcp>=2.0.0,<3`(lock 2.2.0, SDK v2 `MCPServer` — 2026-07-28 스펙, stdio) + `pydantic-settings`. 안전모델(모드·가드레일·preview/confirm·멱등성·감사로그) + 15 툴.
 - **테스트**: `pytest`. SDK 는 `respx` 로 httpx mock, MCP 는 `FakeClient` + paper 엔진 — **라이브 키 불필요, 네트워크 0**.
 
@@ -39,8 +39,8 @@ toss/
 uv sync --package pytossinvest-mcp --extra dev
 
 # 테스트
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (61) — respx mock
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (195) — FakeClient
+uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (68) — respx mock + 로컬 websockets 서버
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (201) — FakeClient
 
 # MCP 서버 실행 (stdio — Claude Desktop/Cursor 등 MCP 클라이언트용)
 TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
