@@ -80,3 +80,37 @@ def test_spend_negative_delta_floors_at_zero(r):
     assert s.current("d", "KRW") == Decimal("0")
     # the credit must not widen today's cap
     assert s.reserve("d", "KRW", Decimal("1200"), Decimal("1000"), "c1") is False
+
+
+def _conditional_spec():
+    from datetime import date
+    from pytossinvest_mcp.conditional import build_request, request_notional
+    mgr = SafetyManager(Settings(_env_file=None), now=lambda: 0.0, today=lambda: date(2026, 6, 18),
+                        token_store=MemoryTokenStore(), spend_store=MemorySpendStore())
+    request = build_request(type="SINGLE", quantity="10", order_type="LIMIT",
+                            expire_date="2026-07-31", first_side="SELL",
+                            first_trigger_price="65000", first_order_price="64900")
+    return mgr.build_conditional_spec(symbol="005930", request=request,
+                                      notional=request_notional(request),
+                                      confirm_high_value_order=False, currency=None)
+
+
+def test_conditional_token_roundtrip(r):
+    s = RedisTokenStore(r)
+    spec = _conditional_spec()
+    s.put("t2", spec, expires_at=100.0, issued_at=50.0)
+    got, _, _ = s.get("t2")
+    assert got.kind == "conditional"
+    assert got.conditional == spec.conditional
+    assert (got.currency, got.notional, got.side) == ("KRW", Decimal("649000"), "SELL")
+
+
+def test_token_saved_before_conditional_support_still_loads(r):
+    import json
+    s = RedisTokenStore(r)
+    s.put("t3", _spec(), expires_at=100.0, issued_at=50.0)
+    d = json.loads(r.get("tok:t3"))
+    del d["spec"]["kind"], d["spec"]["conditional"]   # the pre-upgrade shape
+    r.set("tok:t3", json.dumps(d))
+    got, _, _ = s.get("t3")
+    assert got.kind == "order" and got.conditional is None

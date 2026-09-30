@@ -6,7 +6,7 @@ from decimal import Decimal
 from pytossinvest.money import to_decimal
 
 from .paper import PaperState, Position, PaperOrder, _as_cash_dict
-from .safety import OrderSpec
+from .safety import ORDER_KIND, OrderSpec
 
 
 def _spec_to_dict(spec: OrderSpec) -> dict:
@@ -24,6 +24,8 @@ def _spec_to_dict(spec: OrderSpec) -> dict:
         "currency": spec.currency,
         "modify_order_id": spec.modify_order_id,
         "prev_notional": None if spec.prev_notional is None else str(spec.prev_notional),
+        "kind": spec.kind,
+        "conditional": spec.conditional,
     }
 
 
@@ -42,6 +44,8 @@ def _spec_from_dict(d: dict) -> OrderSpec:
         currency=d["currency"],
         modify_order_id=d["modify_order_id"],
         prev_notional=None if d["prev_notional"] is None else to_decimal(d["prev_notional"]),
+        kind=d.get("kind", ORDER_KIND),
+        conditional=d.get("conditional"),
     )
 
 
