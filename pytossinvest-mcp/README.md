@@ -144,7 +144,7 @@ docker compose up --build
 
 ---
 
-## 20개 툴
+## 24개 툴
 
 입출력의 돈·수량은 **전부 문자열**(JSON/Decimal 안전). 툴 설명(description)에도 string-money / 2단계 주문 / live-only 제약이 명시돼 있어 LLM 이 올바르게 호출합니다.
 
@@ -159,6 +159,10 @@ docker compose up --build
 | `get_candles` | `(symbol, interval, count=100, before=None)` | OHLC 캔들. `interval` 은 `'1m'` 또는 `'1d'` |
 | `get_stock_info` | `(symbols: list)` | 종목 기본정보(최대 200) |
 | `get_market_info` | `(country='KR', base_currency=None, quote_currency=None)` | 시장 캘린더. 통화쌍 주면 환율 동봉 |
+| `get_stock_trends` | `(symbol, kind, count=10, until=None)` | 국내 종목 일별 수급, 최신순. `kind`=investor(투자자별 순매수)·program(프로그램매매)·short_selling(공매도)·credit(신용)·lending(대차). 과거는 `until=nextUntil` |
+| `get_rankings` | `(type, market_country, duration='1d', exclude_investment_caution=False, count=20)` | 거래대금·거래량·상승·하락·토스 거래 순위. 기본 20개(API 기본 100은 컨텍스트가 커서) |
+| `get_market_indicators` | `(symbols)` | 코스피·코스닥(포인트)과 국채 2·3·5·10·20·30년 금리(%) 현재값 |
+| `get_indicator_history` | `(symbol, view, interval, count=None, before=None, until=None)` | `view=candles` 지표 캔들(1m·1d, `before`), `view=investor_trading` 코스피·코스닥 투자자별 매매대금(1d·1w·1mo·1y, `until`). 다른 view 의 커서를 넣으면 거부 |
 | `list_orders` | `(status='OPEN', symbol=None, cursor=None)` | `OPEN`(미체결, 한 번에 전부) 또는 `CLOSED`(체결·취소, 페이지 단위 — 응답의 `nextCursor` 를 `cursor` 로 넘김). paper 는 시뮬 주문 |
 | `get_order` | `(order_id)` | 주문 상세 |
 | `list_conditional_orders` | `(status='OPEN', symbol=None, cursor=None)` | 조건주문 목록(`OPEN`=감시·주문중, `CLOSED`=완료·만료, 페이지 단위). 앱에서 만든 것도 포함. paper 는 빈 목록 |

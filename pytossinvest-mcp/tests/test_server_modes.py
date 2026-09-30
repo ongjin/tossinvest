@@ -9,7 +9,8 @@ from conftest import FakeClient  # reuse the fake (pytest puts tests/ on sys.pat
 
 READ_TOOLS = {"get_accounts", "get_holdings", "get_buying_power", "get_quote", "get_candles",
               "get_stock_info", "get_market_info", "list_orders", "get_order",
-              "list_conditional_orders", "get_conditional_order"}
+              "list_conditional_orders", "get_conditional_order",
+              "get_stock_trends", "get_rankings", "get_market_indicators", "get_indicator_history"}
 WRITE_TOOLS = {"get_order_readiness", "preview_order", "place_order",
                "preview_modify", "modify_order", "cancel_order",
                "preview_conditional_order", "preview_conditional_modify",
@@ -208,3 +209,11 @@ def test_conditional_validation_reaches_the_model(tmp_path):
         asyncio.run(mcp.call_tool("preview_conditional_order", args))
     assert not isinstance(e.value, UnexpectedToolError)
     assert "second_side" in str(e.value)
+
+
+def test_market_data_params_advertise_enums(tmp_path):
+    mcp = _build(tmp_path, "read_only")
+    assert _props(mcp, "get_stock_trends")["kind"]["enum"] == [
+        "investor", "program", "short_selling", "credit", "lending"]
+    assert _props(mcp, "get_indicator_history")["view"]["enum"] == ["candles", "investor_trading"]
+    assert _props(mcp, "get_rankings")["count"]["default"] == 20

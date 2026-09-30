@@ -18,6 +18,7 @@ from .safety import GuardrailError, SafetyManager
 from .tools import AppContext
 from . import __version__
 from . import conditional as CO
+from . import market_data as MD
 from . import tools as T
 
 _KST = ZoneInfo("Asia/Seoul")
@@ -98,6 +99,13 @@ TimeInForce = Literal["DAY", "CLS", "OPG"]
 OrderStatus = Literal["OPEN", "CLOSED"]
 Currency = Literal["KRW", "USD"]
 ConditionalType = Literal["SINGLE", "OCO", "OTO"]
+TrendKind = Literal["investor", "program", "short_selling", "credit", "lending"]
+RankingType = Literal["MARKET_TRADING_AMOUNT", "MARKET_TRADING_VOLUME", "TOP_GAINERS", "TOP_LOSERS",
+                      "TOSS_SECURITIES_TRADING_AMOUNT", "TOSS_SECURITIES_TRADING_VOLUME"]
+MarketCountry = Literal["KR", "US"]
+RankingDuration = Literal["realtime", "1d", "1w", "1mo", "3mo", "6mo", "1y"]
+IndicatorView = Literal["candles", "investor_trading"]
+IndicatorInterval = Literal["1m", "1d", "1w", "1mo", "1y"]
 
 
 # Exceptions whose text is written for the model. SDK >= 2.1 hides the text of any other
@@ -189,6 +197,41 @@ def _register_reads(mcp: MCPServer, app: AppContext) -> None:
                           "of the order it fired, if any.")
     def get_conditional_order(conditional_order_id: str) -> dict:
         return CO.get_conditional_order(app, conditional_order_id)
+
+    @mcp_tool(name="get_stock_trends",
+              description="Daily supply/demand series for a KR stock, newest first: investor "
+                          "(individual/foreign/institution net buying), program (program trading), "
+                          "short_selling, credit (margin and stock loans), lending (securities "
+                          "lending balance). Page older with until=nextUntil. KR symbols only.")
+    def get_stock_trends(symbol: str, kind: TrendKind, count: int = 10,
+                         until: "str | None" = None) -> dict:
+        return MD.get_stock_trends(app, symbol, kind, count, until)
+
+    @mcp_tool(name="get_rankings",
+              description="Stock rankings by market trading amount/volume, top gainers/losers, or "
+                          "Toss users' trading amount/volume. For TOP_GAINERS/TOP_LOSERS the change "
+                          "rate is over duration; other types compare with the previous close.")
+    def get_rankings(type: RankingType, market_country: MarketCountry,
+                     duration: RankingDuration = "1d", exclude_investment_caution: bool = False,
+                     count: int = MD.DEFAULT_RANKING_COUNT) -> dict:
+        return MD.get_rankings(app, type, market_country, duration, exclude_investment_caution,
+                               count)
+
+    @mcp_tool(name="get_market_indicators",
+              description="Current values of KOSPI and KOSDAQ (points) and KR government bond "
+                          "yields KR_BOND_2Y/3Y/5Y/10Y/20Y/30Y (%). Up to 200 symbols.")
+    def get_market_indicators(symbols: list[str]) -> dict:
+        return MD.get_market_indicators(app, symbols)
+
+    @mcp_tool(name="get_indicator_history",
+              description="History of a market indicator. view=candles: OHLC for any indicator, "
+                          "interval 1m or 1d, page back with before=nextBefore. "
+                          "view=investor_trading: trading value by investor type for KOSPI or "
+                          "KOSDAQ, interval 1d/1w/1mo/1y, page back with until=nextUntil.")
+    def get_indicator_history(symbol: str, view: IndicatorView, interval: IndicatorInterval,
+                              count: "int | None" = None, before: "str | None" = None,
+                              until: "str | None" = None) -> dict:
+        return MD.get_indicator_history(app, symbol, view, interval, count, before, until)
 
 
 def _register_writes(mcp: MCPServer, app: AppContext) -> None:
