@@ -92,6 +92,44 @@ class FakeClient:
         self.calls.append(("cancel_order", order_id))
         return {"orderId": "real-3"}
 
+    # market data beyond quotes
+    def _trend(self, kind, symbol, count, until):
+        self.calls.append(("trend", kind, symbol, count, until))
+        return {"records": [{"date": "2026-09-29"}], "nextUntil": None}
+
+    def get_investor_trading(self, symbol, count=10, until=None):
+        return self._trend("investor-trading", symbol, count, until)
+
+    def get_program_trades(self, symbol, count=10, until=None):
+        return self._trend("program-trades", symbol, count, until)
+
+    def get_short_selling(self, symbol, count=10, until=None):
+        return self._trend("short-selling", symbol, count, until)
+
+    def get_credit_trades(self, symbol, count=10, until=None):
+        return self._trend("credit-trades", symbol, count, until)
+
+    def get_securities_lending(self, symbol, count=10, until=None):
+        return self._trend("securities-lending", symbol, count, until)
+
+    def get_rankings(self, type, market_country, duration, *, exclude_investment_caution=False,
+                     count=100):
+        self.calls.append(("get_rankings", type, market_country, duration,
+                           exclude_investment_caution, count))
+        return {"rankedAt": "2026-09-30T10:00:00+09:00", "rankings": []}
+
+    def get_indicator_prices(self, symbols):
+        self.calls.append(("get_indicator_prices", symbols))
+        return [{"symbol": s, "lastPrice": "1"} for s in symbols]
+
+    def get_indicator_candles(self, symbol, interval, count=100, before=None):
+        self.calls.append(("get_indicator_candles", symbol, interval, count, before))
+        return {"candles": [], "nextBefore": None}
+
+    def get_index_investor_trading(self, symbol, interval, count=10, until=None):
+        self.calls.append(("get_index_investor_trading", symbol, interval, count, until))
+        return {"records": [], "nextUntil": None}
+
     # conditional orders (live path)
     def create_conditional_order(self, **kwargs):
         self.calls.append(("create_conditional_order", kwargs))

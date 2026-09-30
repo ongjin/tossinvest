@@ -119,9 +119,10 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 | **`paper`** *(기본)* | ○ | 로컬 시뮬 포트폴리오 체결, **실주문 0** | (기본값) |
 | `live` | ○ | 실주문 | `MODE=live` **+** `ALLOW_LIVE=1` |
 
-## MCP 툴 (20개)
+## MCP 툴 (24개)
 
 - **읽기 (항상):** `get_accounts` · `get_holdings` · `get_buying_power` · `get_quote` · `get_candles` · `get_stock_info` · `get_market_info` · `list_orders` · `get_order` · `list_conditional_orders` · `get_conditional_order`
+- **시장 데이터 읽기 (항상):** `get_stock_trends`(국내 수급 5종: 투자자별·프로그램·공매도·신용·대차) · `get_rankings` · `get_market_indicators`(코스피·코스닥·국채금리) · `get_indicator_history`(지표 캔들·지수 투자자별 매매대금)
 - **쓰기 (paper·live):** `get_order_readiness` · **`preview_order` → `place_order`** · **`preview_modify` → `modify_order`** · `cancel_order`
 - **조건주문 쓰기 (live 전용):** **`preview_conditional_order` → `place_order`** · **`preview_conditional_modify` → `modify_order`** · `cancel_conditional_order` — 감시가 도달 시 브로커가 내는 SINGLE/OCO/OTO 주문, 같은 가드레일·확인 토큰·일일 한도(등록일 전액)를 거칩니다
 

@@ -33,11 +33,20 @@ _GROUP_RATES: dict[str, float] = {
     "ORDER_INFO": 6,
     "CONDITIONAL_ORDER": 5,
     "CONDITIONAL_ORDER_HISTORY": 10,
+    "STOCK_ALL": 1,
+    "STOCK_TRADING_TREND": 10,
+    "RANKING": 5,
+    "MARKET_INDICATOR": 10,
+    "MARKET_INDICATOR_CHART": 5,
 }
 
 # 401 codes where a fresh token fixes the call. token-revoked: the API keeps one live token
 # per client, so another process issuing a token for the same client kills ours.
 _REISSUE_TOKEN_CODES = frozenset({"expired-token", "token-revoked"})
+
+
+def _drop_none(params: dict) -> dict:
+    return {k: v for k, v in params.items() if v is not None}
 
 
 class TossInvestClient:
@@ -242,6 +251,58 @@ class TossInvestClient:
     def get_market_calendar(self, country: str, date: str | None = None) -> dict:
         params = {"date": date} if date else None
         return self._request("GET", f"/api/v1/market-calendar/{country}", group="MARKET_INFO", params=params)
+
+    def get_all_stocks(self, market: str, *, status: str | None = None,
+                       security_type: str | None = None, common_share: bool | None = None) -> list:
+        """Every symbol of one market (KOSPI, KOSDAQ, NYSE, NASDAQ, AMEX, KR_ETC, US_ETC). Large."""
+        params = _drop_none({"market": market, "status": status, "securityType": security_type,
+                             "commonShare": common_share})
+        return self._request("GET", "/api/v1/stocks/all", group="STOCK_ALL", params=params)
+
+    # --- KR trading trends (newest first; page with until=nextUntil) ---
+    def _trading_trend(self, kind: str, symbol: str, count: int, until: str | None) -> dict:
+        params = _drop_none({"count": count, "until": until})
+        return self._request("GET", f"/api/v1/stocks/{symbol}/{kind}", group="STOCK_TRADING_TREND",
+                             params=params)
+
+    def get_investor_trading(self, symbol: str, count: int = 10, until: str | None = None) -> dict:
+        return self._trading_trend("investor-trading", symbol, count, until)
+
+    def get_program_trades(self, symbol: str, count: int = 10, until: str | None = None) -> dict:
+        return self._trading_trend("program-trades", symbol, count, until)
+
+    def get_short_selling(self, symbol: str, count: int = 10, until: str | None = None) -> dict:
+        return self._trading_trend("short-selling", symbol, count, until)
+
+    def get_credit_trades(self, symbol: str, count: int = 10, until: str | None = None) -> dict:
+        return self._trading_trend("credit-trades", symbol, count, until)
+
+    def get_securities_lending(self, symbol: str, count: int = 10, until: str | None = None) -> dict:
+        return self._trading_trend("securities-lending", symbol, count, until)
+
+    def get_rankings(self, type: str, market_country: str, duration: str, *,
+                     exclude_investment_caution: bool = False, count: int = 100) -> dict:
+        params = {"type": type, "marketCountry": market_country, "duration": duration,
+                  "excludeInvestmentCaution": exclude_investment_caution, "count": count}
+        return self._request("GET", "/api/v1/rankings", group="RANKING", params=params)
+
+    # --- market indicators (KOSPI, KOSDAQ, KR_BOND_2Y..30Y) ---
+    def get_indicator_prices(self, symbols: list[str]) -> list:
+        return self._request("GET", "/api/v1/market-indicators/prices", group="MARKET_INDICATOR",
+                             params={"symbols": ",".join(symbols)})
+
+    def get_indicator_candles(self, symbol: str, interval: str, count: int = 100,
+                              before: str | None = None) -> dict:
+        params = _drop_none({"interval": interval, "count": count, "before": before})
+        return self._request("GET", f"/api/v1/market-indicators/{symbol}/candles",
+                             group="MARKET_INDICATOR_CHART", params=params)
+
+    def get_index_investor_trading(self, symbol: str, interval: str, count: int = 10,
+                                   until: str | None = None) -> dict:
+        """Trading value by investor type for KOSPI or KOSDAQ."""
+        params = _drop_none({"interval": interval, "count": count, "until": until})
+        return self._request("GET", f"/api/v1/market-indicators/{symbol}/investor-trading",
+                             group="MARKET_INDICATOR", params=params)
 
     # --- order info ---
     def get_buying_power(self, currency: str) -> "BuyingPower":
