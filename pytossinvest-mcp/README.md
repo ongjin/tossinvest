@@ -175,10 +175,10 @@ docker compose up --build
 | `place_order` | `(confirmation_token)` | **STEP 2/2.** 토큰으로 체결. consume 직후·실행 전 일일 한도 재검사. 멱등(실패하면 같은 토큰 재시도 가능) |
 | `preview_modify` | `(order_id, order_type, price=None, quantity=None, confirm_high_value_order=False)` | **정정 STEP 1/2** (**live 전용**). 원주문 조회 → 정정 후 notional 로 가드레일 검사 → `confirmationToken`. 정정 안 함 |
 | `modify_order` | `(confirmation_token)` | **정정 STEP 2/2** (**live 전용**). 토큰으로 정정 실행, 새 orderId 반환. 멱등 |
-| `cancel_order` | `(order_id)` | 취소 (**live 전용**, 새 orderId 반환). 취소 전 원주문 상태를 감사 로그에 기록 |
+| `cancel_order` | `(order_id)` | 취소 (**live 전용**, 새 orderId 반환). 종목 거부·허용 목록 적용. 취소 전 원주문 상태를 감사 로그에 기록 |
 | `preview_conditional_order` | `(symbol, type, quantity, order_type, expire_date, first_side, first_trigger_price, first_order_price=None, second_side=None, second_trigger_price=None, second_order_price=None, confirm_high_value_order=False)` | **조건주문 STEP 1/2** (**live 전용**). `type`=SINGLE/OCO/OTO. 가드레일 검사 후 토큰 발급 → `place_order` 로 등록. 금액은 SINGLE 한 조건·OCO 큰 쪽·OTO 합, **등록일 한도에서 전액 차감** |
 | `preview_conditional_modify` | `(conditional_order_id, <위와 같음, symbol 없음>)` | **조건주문 정정 STEP 1/2** (**live 전용**). 전체 재설정 → `modify_order` 로 실행, 새 id 반환. 한도는 증감분만 |
-| `cancel_conditional_order` | `(conditional_order_id)` | 조건주문 취소 (**live 전용**). 한도 환급 없음 |
+| `cancel_conditional_order` | `(conditional_order_id)` | 조건주문 취소 (**live 전용**). 종목 거부·허용 목록 적용(앱에서 건 손절 보호). 한도 환급 없음 |
 
 ---
 

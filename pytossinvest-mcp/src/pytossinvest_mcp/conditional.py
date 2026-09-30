@@ -176,6 +176,7 @@ def cancel_conditional_order(app, conditional_order_id: str) -> dict:
     """Cancelling lowers risk, so no preview; it never refunds the registration-day cap."""
     _require_live(app)
     previous = app.client.get_conditional_order(conditional_order_id)
+    app.safety.check_symbol(previous["symbol"])
     app.client.cancel_conditional_order(conditional_order_id)
     _audit(app, "cancel_conditional_order", "canceled", conditionalOrderId=conditional_order_id,
            previousStatus=previous.get("status"))

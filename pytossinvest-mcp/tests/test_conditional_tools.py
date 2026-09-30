@@ -200,3 +200,13 @@ def test_place_then_modify_through_either_state_backend(app_factory, fake_client
                                                           first_order_price="70000"))
     T.modify_order(app, confirmation_token=pm["confirmationToken"])
     assert _spent(app) == Decimal("700000")   # 649,000 on registration + 51,000 modify delta
+
+
+def test_cancel_respects_the_allow_list(app_factory, fake_client):
+    # a conditional order may be the user's own stop-loss; the symbol lists guard it
+    app = app_factory(mode="live", allow_live=True, enforce_market_hours=False,
+                      allow_symbols=["000660"])
+    with pytest.raises(GuardrailError) as e:
+        C.cancel_conditional_order(app, "co-1")   # co-1 is a 005930 order
+    assert e.value.code == "symbol-not-allowed"
+    assert ("cancel_conditional_order", "co-1") not in fake_client.calls

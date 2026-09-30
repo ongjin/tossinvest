@@ -391,6 +391,7 @@ def cancel_order(app: AppContext, order_id: str) -> dict:
         from .paper import PaperError
         raise PaperError("paper mode fills orders immediately; cancel is live-only")
     previous = app.client.get_order(order_id)
+    app.safety.check_symbol(previous["symbol"])
     result = app.client.cancel_order(order_id)
     app.audit.record({"tool": "cancel_order", "mode": app.config.mode,
                       "decision": "canceled", "orderId": order_id,
