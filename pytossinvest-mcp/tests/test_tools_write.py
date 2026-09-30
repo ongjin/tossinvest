@@ -340,3 +340,11 @@ def test_a_place_token_cannot_modify(app_factory, fake_client):
     with pytest.raises(GuardrailError) as e:
         T.modify_order(app, confirmation_token=pv["confirmationToken"])
     assert e.value.code == "wrong-token"
+
+
+def test_cancel_order_respects_the_deny_list(app_factory, fake_client):
+    app = app_factory(mode="live", allow_live=True, deny_symbols=["005930"])
+    with pytest.raises(GuardrailError) as e:
+        T.cancel_order(app, "real-1")   # real-1 is a 005930 order
+    assert e.value.code == "symbol-denied"
+    assert not [c for c in fake_client.calls if c[0] == "cancel_order"]

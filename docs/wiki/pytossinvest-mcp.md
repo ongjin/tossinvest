@@ -7,7 +7,7 @@
 LLM(Claude Desktop/Cursor 등)에 토스 계좌 읽기/거래를 **안전하게** 쥐여주는 MCP 서버. **Apache-2.0**. `pytossinvest` SDK 의존. **stdio**(기본) 또는 **http** 트랜스포트.
 
 - 위치: `pytossinvest-mcp/src/pytossinvest_mcp/`
-- 테스트: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests` (FakeClient + paper 엔진, 243개, **라이브 키 불필요**)
+- 테스트: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests` (FakeClient + paper 엔진, 245개, **라이브 키 불필요**)
 - 의존: `mcp>=2.0.0,<3`(SDK v2 `MCPServer`, lock 2.2.0 — 2.1 부터 도구 예외 은닉, 아래 함정), `pydantic-settings`(직접 의존 — v2 부터 `mcp` 가 안 끌고 옴), `pytossinvest`. 옵션 extra: `redis = ["redis>=5"]`(HA 백엔드), `http = ["uvicorn>=0.30"]`(http 트랜스포트). dev extra: `fakeredis[lua]>=2`(테스트).
 
 ## 🔒 안전 불변식 (이 프로젝트의 핵심 — 절대 깨지 말 것)
@@ -160,7 +160,7 @@ transport는 `stdio`(기본, 단일 클라이언트) 또는 `http`(원격 다중
 - **쓰기(read_only 외)**: `get_order_readiness`·`preview_order`→`place_order`·**`preview_modify`**→`modify_order(confirmation_token)`·`cancel_order`
   - `preview_modify(order_id, order_type, price=None, quantity=None, confirm_high_value_order=False)` — live 전용. 원주문 조회 → 병합 → `build_spec(modify_order_id=order_id, prev_notional=원본price×qty, currency=권위통화)` → `check_guardrails(check_daily=True, prev_notional=…)` → `issue_token` → 감사(`modify_previewed`, previousStatus).
   - `modify_order(confirmation_token)` — live 전용. `consume` → `check_guardrails(check_daily=True, prev_notional=spec.prev_notional)` 재검사 → `reserve(signed delta)` → `client.modify_order` → 성공 시 `commit(token)`(delta 영구 반영, 0-하한) / 실패 시 `release(delta)`, 토큰 유지 → 감사(`modified`, notional=delta, currency).
-  - `cancel_order(order_id)` — live 전용. 취소 전 원주문 `previousStatus` 를 감사(`canceled`)에 기록.
+  - `cancel_order(order_id)` — live 전용. 원주문 조회 → **`safety.check_symbol`(deny/allow)** → 취소, `previousStatus` 를 감사(`canceled`)에 기록.
 - 출력 돈/수량은 전부 **문자열**(`_paper_order_dict`·holdings 등에서 `str()`). 툴 description 에 "string money / 2단계 주문 / live-only" 명시(LLM 가이드).
 
 ## 조건주문 (`conditional.py`, 2026-09-30)
@@ -178,6 +178,7 @@ transport는 `stdio`(기본, 단일 클라이언트) 또는 `http`(원격 다중
 - **명목**: 다리 가격 = `orderPrice`(LIMIT) / `triggerPrice`(MARKET), 다리 금액 = 수량 × 가격. SINGLE = 한 다리, **OCO = 큰 다리**(하나만 발동), **OTO = 두 다리 합**(둘 다 발동). 통화는 시세 통화 → `order_currency` 폴백. 가드레일은 일반 주문과 동일, **장 시간 게이트만 생략**(등록은 아무 때나, 발동은 세션 중).
 - **일일 한도(사용자 결정)**: 등록한 날(KST) **전액** 예약 — 발동 여부 무관. 수정은 **`max(0, new − old)`**(`SafetyManager.spend_delta` — 조건주문은 만기까지 살아서 전날 센 주문일 수 있으니 축소가 오늘 한도를 환급하면 "축소 후 취소"로 취소-무환급 규칙이 뚫린다. 일반 주문 정정은 종전대로 음수 델타 credit). old = `get_conditional_order` 상세로 같은 규칙 계산, 가격 없는 다리(앱에서 만든 `PROFIT_RATE` 등)나 예상 밖 응답 형태면 old 미상 → 새 금액 전액. **취소는 환급 없음**. 0-하한·확실한-거부 release 규칙 그대로, 단 `duplicate-conditional-order` 4xx 는 **예약 유지**(`_RETRY_ECHO_CODES` — 타임아웃 뒤 실제 등록된 주문을 같은 토큰으로 재시도하면 토스가 멱등 응답 대신 종목당 1개 규칙으로 거절할 수 있다).
 - **토큰 용도·격리**: `place_order` 는 정정 토큰, `modify_order` 는 주문 토큰을 `wrong-token` 으로 거부(정정 토큰은 차액만 예약 — 일반 주문에도 적용). 실행 단계(`execute_place/execute_modify`)는 `_require_live` — paper 인스턴스가 공유 redis 의 조건주문 토큰을 받아도 실브로커로 안 나간다. redis 에선 조건주문 토큰을 **`ctok:`** 키에 둔다(`RedisTokenStore` — 조건주문 이전 빌드가 같은 redis 를 보면 `tok:` 만 읽어 조건주문 spec 을 일반(시장가일 수 있는) 주문으로 즉시 실행할 수 있어서).
+- **취소**: 확인 토큰 없이 한 번 호출이지만 **deny/allow 목록을 적용**(`check_symbol`) — 앱에서 건 손절일 수 있어 "취소는 위험을 줄인다"가 성립하지 않는다(2026-09-30 사용자 결정: 2단계 토큰 대신 목록만). 한도 환급 없음.
 - **멱등성**: 등록은 `clientOrderId` 전달 → 같은 토큰 재시도 안전. 수정은 키가 없어, 반영된 수정을 재시도하면 옛 id 가 4xx → 델타 release(주문 정정과 같은 한계).
 - **라이브 검증 범위**: OCI 는 `read_only` 라 조회만 실측. 쓰기는 실제 조건주문이 걸리므로 라이브로 돌리지 않았다(FakeClient 테스트 + `call_tool` 왕복만).
 

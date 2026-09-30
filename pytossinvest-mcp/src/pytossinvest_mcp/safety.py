@@ -182,6 +182,15 @@ class SafetyManager:
             return max(Decimal("0"), delta)
         return delta
 
+    def check_symbol(self, symbol: str) -> None:
+        """Deny / allow lists. Also guards cancels: a conditional order may be a stop-loss."""
+        cfg = self._cfg
+        sym = _canon_symbol(symbol)
+        if cfg.deny_symbols and sym in {_canon_symbol(s) for s in cfg.deny_symbols}:
+            raise GuardrailError("symbol-denied", f"{symbol} is in the deny list")
+        if cfg.allow_symbols and sym not in {_canon_symbol(s) for s in cfg.allow_symbols}:
+            raise GuardrailError("symbol-not-allowed", f"{symbol} is not in the allow list")
+
     def check_guardrails(
         self, spec: OrderSpec, *, is_market_open: bool, enforce_hours: bool,
         check_daily: bool = True, prev_notional: "Decimal | None" = None,
@@ -197,11 +206,7 @@ class SafetyManager:
             hard_ceiling = MAX_ORDER_THRESHOLD
             per_order_cap = to_decimal(cfg.max_order_amount)
             daily_cap = to_decimal(cfg.daily_order_limit)
-        sym = _canon_symbol(spec.symbol)
-        if cfg.deny_symbols and sym in {_canon_symbol(s) for s in cfg.deny_symbols}:
-            raise GuardrailError("symbol-denied", f"{spec.symbol} is in the deny list")
-        if cfg.allow_symbols and sym not in {_canon_symbol(s) for s in cfg.allow_symbols}:
-            raise GuardrailError("symbol-not-allowed", f"{spec.symbol} is not in the allow list")
+        self.check_symbol(spec.symbol)
         if spec.notional > hard_ceiling:
             raise GuardrailError(
                 "max-order-exceeded",
