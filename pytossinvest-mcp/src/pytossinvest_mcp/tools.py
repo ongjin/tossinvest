@@ -107,12 +107,13 @@ def get_buying_power(app: AppContext, currency: str | None = None) -> dict:
     return {"buyingPower": [_buying_power_item(app, c) for c in currencies]}
 
 
-def list_orders(app: AppContext, status: str = "OPEN", symbol: str | None = None) -> dict:
+def list_orders(app: AppContext, status: str = "OPEN", symbol: str | None = None,
+                cursor: str | None = None) -> dict:
     if app.use_paper:
         items = [_paper_order_dict(o) for o in app.paper.list_orders()
                  if symbol is None or o.symbol == symbol]
         return {"orders": items, "hasNext": False}
-    return app.client.list_orders(status=status, symbol=symbol)
+    return app.client.list_orders(status=status, symbol=symbol, cursor=cursor)
 
 
 def get_order(app: AppContext, order_id: str) -> dict:

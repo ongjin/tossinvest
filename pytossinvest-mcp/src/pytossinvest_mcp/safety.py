@@ -28,6 +28,17 @@ def order_currency(symbol: str) -> str:
     return "KRW" if first.isascii() and first.isdigit() else "USD"
 
 
+def _is_positive_number(val: str) -> bool:
+    """A finite value > 0. Unparseable strings, NaN and infinities are rejected here (as a
+    guardrail the model can read) instead of escaping as decimal.InvalidOperation. Floats still
+    raise TypeError from to_decimal: the float ban is a caller bug, not order input."""
+    try:
+        d = to_decimal(val)
+    except InvalidOperation:
+        return False
+    return d.is_finite() and d > 0
+
+
 def _canon_symbol(s: str) -> str:
     """Canonicalize a symbol for deny/allow matching: NFKC-fold, drop separator/control chars, uppercase."""
     s = unicodedata.normalize("NFKC", s)
@@ -110,7 +121,7 @@ class SafetyManager:
         currency: "str | None" = None,
     ) -> OrderSpec:
         for label, val in (("quantity", quantity), ("price", price), ("order_amount", order_amount)):
-            if val is not None and to_decimal(val) <= 0:
+            if val is not None and not _is_positive_number(val):
                 raise GuardrailError(
                     "invalid-order-value", f"{label} must be a positive number, got {val!r}"
                 )

@@ -316,4 +316,4 @@ curl 'https://openapi.tossinvest.com/api/v1/holdings' \
 
 ---
 
-> 📌 **이 레포에서의 구현 현황**: SDK(`pytossinvest`)는 §1~§5 의 인증·레이트리밋·decimal·에러·엔드포인트를 구현 완료(MIT). **단 2026-09-30 확인 기준 1.1.1 시점 엔드포인트만 래핑** — 미래핑: `/stocks/all`, 수급 동향 5종, `/rankings`, `/market-indicators/*` 3종, 조건주문 5종(§4.9), WebSocket 전체. SDK 의 그룹별 기본 한도(`client.py`)·피크 반토막 대상(`ratelimit.py` `PEAK_GROUPS`)은 1.1.1 수치라 §3 최신값과 어긋난다(보수적 쪽이라 동작엔 무해). MCP 서버(`pytossinvest-mcp`)는 그 위에 안전모델(모드·가드레일·preview→confirm·멱등성)을 얹음(Apache-2.0). 설계·구현 상세는 `docs/superpowers/` 의 spec/plan, 운영 컨벤션은 루트 `AGENTS.md` 참고.
+> 📌 **이 레포에서의 구현 현황**: SDK(`pytossinvest`)는 §1~§5 의 인증·레이트리밋·decimal·에러·엔드포인트를 구현 완료(MIT). 조건주문 5종(§4.9)과 WebSocket(§4.10, `pytossinvest.stream`·`[ws]` extra)은 2026-09-30 래핑 — 미래핑: `/stocks/all`, 수급 동향 5종, `/rankings`, `/market-indicators/*` 3종. MCP 는 조건주문·스트림을 아직 노출하지 않는다(주문 경로라 안전모델 설계 필요). SDK 의 그룹별 기본 한도(`client.py`)·피크 반토막 대상(`ratelimit.py` `PEAK_GROUPS`)은 1.1.1 수치라 §3 최신값과 어긋난다(보수적 쪽이라 동작엔 무해). MCP 서버(`pytossinvest-mcp`)는 그 위에 안전모델(모드·가드레일·preview→confirm·멱등성)을 얹음(Apache-2.0). 설계·구현 상세는 `docs/superpowers/` 의 spec/plan, 운영 컨벤션은 루트 `AGENTS.md` 참고.

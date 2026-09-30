@@ -31,6 +31,8 @@ _GROUP_RATES: dict[str, float] = {
     "ORDER": 6,
     "ORDER_HISTORY": 5,
     "ORDER_INFO": 6,
+    "CONDITIONAL_ORDER": 5,
+    "CONDITIONAL_ORDER_HISTORY": 10,
 }
 
 # 401 codes where a fresh token fixes the call. token-revoked: the API keeps one live token
@@ -155,6 +157,9 @@ class TossInvestClient:
                 )
             return body["result"]
 
+        if resp.status_code == 204:  # no body and no result envelope (conditional-order DELETE)
+            return None
+
         try:
             body = resp.json()
         except ValueError:
@@ -186,6 +191,11 @@ class TossInvestClient:
             )
 
         raise error_from_response(resp.status_code, body, resp.headers)
+
+    def access_token(self) -> str:
+        """A current OAuth access token (cached, refreshed when near expiry), e.g. for the
+        WebSocket handshake in pytossinvest.stream."""
+        return self._token.get_token()
 
     # --- account / asset ---
     def get_accounts(self) -> list:
@@ -290,3 +300,57 @@ class TossInvestClient:
 
     def cancel_order(self, order_id: str) -> dict:
         return self._request("POST", f"/api/v1/orders/{order_id}/cancel", group="ORDER", account=True, json={})
+
+    # --- conditional orders ---
+    # first/second use the wire shape {"orderSide", "triggerPrice", "orderPrice"?} with string prices.
+    @staticmethod
+    def _conditional_payload(type: str, quantity: str, order_type: str, expire_date: str,
+                             first: dict, second: dict | None, confirm_high_value_order: bool) -> dict:
+        payload: dict = {"type": type, "quantity": quantity, "orderType": order_type,
+                         "expireDate": expire_date, "first": first,
+                         "confirmHighValueOrder": confirm_high_value_order}
+        if second is not None:
+            payload["second"] = second
+        return payload
+
+    def create_conditional_order(self, *, symbol: str, type: str, quantity: str, order_type: str,
+                                 expire_date: str, first: dict, second: dict | None = None,
+                                 client_order_id: str | None = None,
+                                 confirm_high_value_order: bool = False) -> dict:
+        """Register a SINGLE / OCO / OTO order that fires when its trigger price is reached."""
+        payload = self._conditional_payload(type, quantity, order_type, expire_date, first, second,
+                                            confirm_high_value_order)
+        payload["symbol"] = symbol
+        if client_order_id is not None:
+            payload["clientOrderId"] = client_order_id
+        return self._request("POST", "/api/v1/conditional-orders", group="CONDITIONAL_ORDER",
+                             account=True, json=payload)
+
+    def modify_conditional_order(self, conditional_order_id: str, *, type: str, quantity: str,
+                                 order_type: str, expire_date: str, first: dict,
+                                 second: dict | None = None,
+                                 confirm_high_value_order: bool = False) -> dict:
+        """Replace the whole order. The API cancels and re-creates it: the returned id is new."""
+        payload = self._conditional_payload(type, quantity, order_type, expire_date, first, second,
+                                            confirm_high_value_order)
+        return self._request("POST", f"/api/v1/conditional-orders/{conditional_order_id}/modify",
+                             group="CONDITIONAL_ORDER", account=True, json=payload)
+
+    def cancel_conditional_order(self, conditional_order_id: str) -> None:
+        self._request("DELETE", f"/api/v1/conditional-orders/{conditional_order_id}",
+                      group="CONDITIONAL_ORDER", account=True)
+
+    def list_conditional_orders(self, status: str = "OPEN", symbol: str | None = None,
+                                cursor: str | None = None, limit: int = 20) -> dict:
+        """Includes conditional orders made in other channels (e.g. the app)."""
+        params = {"status": status, "limit": limit}
+        if symbol:
+            params["symbol"] = symbol
+        if cursor:
+            params["cursor"] = cursor
+        return self._request("GET", "/api/v1/conditional-orders", group="CONDITIONAL_ORDER_HISTORY",
+                             account=True, params=params)
+
+    def get_conditional_order(self, conditional_order_id: str) -> dict:
+        return self._request("GET", f"/api/v1/conditional-orders/{conditional_order_id}",
+                             group="CONDITIONAL_ORDER_HISTORY", account=True)

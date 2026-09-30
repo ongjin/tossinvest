@@ -313,3 +313,15 @@ def test_per_order_cap_uses_full_notional_not_delta():
         m.check_guardrails(spec, is_market_open=True, enforce_hours=False,
                            prev_notional=Decimal("700000"))
     assert e.value.code == "order-amount-cap"
+
+
+@pytest.mark.parametrize("field, bad", [
+    ("quantity", "ten"), ("quantity", ""), ("price", "NaN"), ("order_amount", "Infinity"),
+])
+def test_build_spec_rejects_unparseable_numbers(field, bad):
+    # decimal.InvalidOperation is not a model-facing error, so the reason would be hidden
+    m = _mgr()
+    kw = {field: bad} if field == "order_amount" else {"quantity": "1", "price": "70000", field: bad}
+    with pytest.raises(GuardrailError) as e:
+        m.build_spec(symbol="005930", side="BUY", order_type="LIMIT", **kw)
+    assert e.value.code == "invalid-order-value"

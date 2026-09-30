@@ -70,3 +70,16 @@ def test_get_buying_power_real_in_read_only(app_factory, fake_client):
     out = T.get_buying_power(app, "USD")
     assert out == {"buyingPower": [{"currency": "USD", "cashBuyingPower": "500000"}]}
     assert ("get_buying_power", "USD") in fake_client.calls
+
+
+def test_list_orders_passes_cursor_for_closed_pages(app_factory, fake_client):
+    seen = {}
+
+    def list_orders(status="OPEN", symbol=None, cursor=None, limit=20):
+        seen.update(status=status, cursor=cursor)
+        return {"orders": [], "nextCursor": None, "hasNext": False}
+    fake_client.list_orders = list_orders
+
+    app = app_factory(mode="read_only")
+    T.list_orders(app, "CLOSED", cursor="c-2")
+    assert seen == {"status": "CLOSED", "cursor": "c-2"}
