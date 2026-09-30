@@ -175,22 +175,69 @@ def test_cancel_records_previous_status(app_factory, fake_client):
     assert entry["previousStatus"] == "PENDING"
 
 
-def test_place_failure_releases_reservation(app_factory, fake_client):
-    app = app_factory(mode="live", allow_live=True, daily_order_limit="1000000",
-                      enforce_market_hours=False)
+def _live_cap_app(app_factory):
+    # per-order 1,000,000 (default) / daily 1,000,000: two 600,000 orders cannot both fit
+    return app_factory(mode="live", allow_live=True, daily_order_limit="1000000",
+                       enforce_market_hours=False)
 
-    def boom(**kwargs):
-        raise RuntimeError("toss 500")
-    fake_client.place_order = boom
 
-    prev = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
-                           quantity="1", price="100000")
-    with pytest.raises(RuntimeError):
-        T.place_order(app, confirmation_token=prev["confirmationToken"])
-    # reservation released: a fresh full-cap-adjacent order still previews/reserves fine
+def _fresh_600k_fits(app):
     spec = app.safety.build_spec(symbol="005930", side="BUY", order_type="LIMIT",
-                                 quantity="1", price="100000")
-    assert app.safety.reserve(spec) is True
+                                 quantity="6", price="100000")
+    return app.safety.reserve(spec)
+
+
+def test_place_rejected_by_toss_releases_reservation(app_factory, fake_client):
+    from pytossinvest.errors import BusinessRuleError
+    app = _live_cap_app(app_factory)
+
+    def reject(**kwargs):
+        raise BusinessRuleError("insufficient-buying-power", "", http_status=422)
+    fake_client.place_order = reject
+
+    pv = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                         quantity="6", price="100000")
+    with pytest.raises(BusinessRuleError):
+        T.place_order(app, confirmation_token=pv["confirmationToken"])
+    assert _fresh_600k_fits(app) is True  # a definite 4xx rejection frees the budget
+
+
+def test_place_ambiguous_failure_keeps_reservation(app_factory, fake_client):
+    from pytossinvest.errors import ServerError
+    app = _live_cap_app(app_factory)
+    real_place = fake_client.place_order
+
+    def timeout(**kwargs):
+        raise ServerError("internal-error", "", http_status=503)  # may or may not have filled
+    fake_client.place_order = timeout
+
+    pv = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                         quantity="6", price="100000")
+    with pytest.raises(ServerError):
+        T.place_order(app, confirmation_token=pv["confirmationToken"])
+    # a second order via a NEW preview must not slip past the cap
+    assert _fresh_600k_fits(app) is False
+
+    # retrying the same token is still allowed and counted once
+    fake_client.place_order = real_place
+    T.place_order(app, confirmation_token=pv["confirmationToken"])
+    from datetime import date
+    assert app.safety.spend_store.current(date(2026, 6, 17).isoformat(), "KRW") == Decimal("600000")
+
+
+def test_modify_ambiguous_failure_keeps_reservation(app_factory, fake_client):
+    from datetime import date
+    app = app_factory(mode="live", allow_live=True, enforce_market_hours=False)
+
+    def boom(order_id, **kwargs):
+        raise RuntimeError("connection reset")  # unknown outcome
+    fake_client.modify_order = boom
+
+    # original real-1 = 700,000 ; modify to 71000*10 = 710,000 ; delta +10,000
+    pv = T.preview_modify(app, "real-1", order_type="LIMIT", price="71000")
+    with pytest.raises(RuntimeError):
+        T.modify_order(app, confirmation_token=pv["confirmationToken"])
+    assert app.safety.spend_store.current(date(2026, 6, 17).isoformat(), "KRW") == Decimal("10000")
 
 
 def test_preview_uses_authoritative_currency_from_api(app_factory, fake_client):
@@ -237,6 +284,7 @@ def test_country_for_order_prefers_authoritative_currency():
     assert T._country_for_order("AAPL", None) == "US"
     assert T._country_for_order("005930", None) == "KR"
     assert T._country_for_order("AAPL", "") == "US"
+    assert T._country_for_order("BRK.B", None) == "US"  # punctuated US ticker, no quote
 
 
 def test_market_gate_uses_authoritative_currency_for_country(app_factory, fake_client):

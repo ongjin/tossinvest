@@ -153,6 +153,13 @@ def test_order_currency_alpha_is_usd_numeric_is_krw():
     assert order_currency("005930") == "KRW"
 
 
+def test_order_currency_punctuated_us_ticker_is_usd():
+    # fallback when the quote lookup fails: a US ticker must never fall into the (larger) KRW caps
+    assert order_currency("BRK.B") == "USD"
+    assert order_currency("BF-B") == "USD"
+    assert order_currency("0101N0") == "KRW"  # KR codes may be alphanumeric but start with a digit
+
+
 def test_build_spec_sets_currency_and_modify_id():
     m = _mgr()
     krw = m.build_spec(symbol="005930", side="BUY", order_type="LIMIT", quantity="1", price="70000")
@@ -258,7 +265,7 @@ def test_canon_symbol_keeps_legit_dotted_symbol():
         _ok(m, _spec(m, symbol="brk.b", price="100"))   # normalized match
     assert e.value.code == "symbol-denied"
     # an unrelated dotted symbol is not blocked
-    _ok(m, _spec(m, symbol="BF.B"))
+    _ok(m, _spec(m, symbol="BF.B", price="100"))
 
 
 def test_build_spec_explicit_currency_overrides_symbol_shape():

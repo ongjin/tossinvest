@@ -59,7 +59,7 @@ def build_app() -> AppContext:
     settings = Settings(_env_file=None, mode="paper", paper_starting_cash=STARTING_CASH)
     safety = SafetyManager(
         settings,
-        now=time.monotonic,                       # 토큰 TTL 용 (실시계)
+        now=time.time,                            # 토큰 TTL 용 (실시계)
         today=date.today,                         # 일일 누적 리셋 기준
         gen_id=lambda: "demo-" + uuid.uuid4().hex[:8],
         token_store=MemoryTokenStore(),
@@ -97,7 +97,7 @@ def main() -> None:
                        quantity="10", price="70000")  # 700,000원 (한도 내)
     print("  preview: 예상비용", pv["estimatedNotional"], "원, token=", pv["confirmationToken"][:16], "…")
     out = place_order(app, confirmation_token=pv["confirmationToken"])
-    print("  place:", out["status"], "| 체결 후 매수여력:", app.paper.buying_power(), "원\n")
+    print("  place:", out["status"], "| 체결 후 매수여력:", app.paper.buying_power("KRW"), "원\n")
 
     print("── 3) 멱등: 토큰은 성공 시 1회만 소비된다 ──")
     try:

@@ -46,7 +46,8 @@ class MemorySpendStore:
         cur = self._spent.get((day, currency), Decimal("0"))
         if cur + delta > cap:
             return False
-        self._spent[(day, currency)] = cur + delta
+        # floored: a downsize of an order never counted here must not bank credit under the cap
+        self._spent[(day, currency)] = max(Decimal("0"), cur + delta)
         seen.add(dedup_key)
         return True
 

@@ -119,9 +119,9 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 | **`paper`** *(기본)* | ○ | 로컬 시뮬 포트폴리오 체결, **실주문 0** | (기본값) |
 | `live` | ○ | 실주문 | `MODE=live` **+** `ALLOW_LIVE=1` |
 
-## MCP 툴 (14개)
+## MCP 툴 (15개)
 
-- **읽기 (항상):** `get_accounts` · `get_holdings` · `get_quote` · `get_candles` · `get_stock_info` · `get_market_info` · `list_orders` · `get_order`
+- **읽기 (항상):** `get_accounts` · `get_holdings` · `get_buying_power` · `get_quote` · `get_candles` · `get_stock_info` · `get_market_info` · `list_orders` · `get_order`
 - **쓰기 (paper·live):** `get_order_readiness` · **`preview_order` → `place_order`** · **`preview_modify` → `modify_order`** · `cancel_order`
 
 가드레일 한도·종목 allow/deny·시작 현금 등은 전부 env 로 조절합니다 → [`pytossinvest-mcp/README.md`](pytossinvest-mcp/README.md).

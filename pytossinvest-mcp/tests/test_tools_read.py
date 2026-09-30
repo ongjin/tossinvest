@@ -54,3 +54,19 @@ def test_get_order_paper_not_found_raises(app_factory):
     import pytest
     with pytest.raises(ValueError):
         T.get_order(app, "nope")
+
+
+def test_get_buying_power_paper_defaults_to_both_currencies(app_factory):
+    app = app_factory(mode="paper")
+    out = T.get_buying_power(app)
+    assert out == {"buyingPower": [
+        {"currency": "KRW", "cashBuyingPower": "10000000"},
+        {"currency": "USD", "cashBuyingPower": "1000000"},
+    ]}
+
+
+def test_get_buying_power_real_in_read_only(app_factory, fake_client):
+    app = app_factory(mode="read_only")
+    out = T.get_buying_power(app, "USD")
+    assert out == {"buyingPower": [{"currency": "USD", "cashBuyingPower": "500000"}]}
+    assert ("get_buying_power", "USD") in fake_client.calls
