@@ -7,7 +7,7 @@
 LLM(Claude Desktop/Cursor 등)에 토스 계좌 읽기/거래를 **안전하게** 쥐여주는 MCP 서버. **Apache-2.0**. `pytossinvest` SDK 의존. **stdio**(기본) 또는 **http** 트랜스포트.
 
 - 위치: `pytossinvest-mcp/src/pytossinvest_mcp/`
-- 테스트: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests` (FakeClient + paper 엔진, 201개, **라이브 키 불필요**)
+- 테스트: `uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests` (FakeClient + paper 엔진, 230개, **라이브 키 불필요**)
 - 의존: `mcp>=2.0.0,<3`(SDK v2 `MCPServer`, lock 2.2.0 — 2.1 부터 도구 예외 은닉, 아래 함정), `pydantic-settings`(직접 의존 — v2 부터 `mcp` 가 안 끌고 옴), `pytossinvest`. 옵션 extra: `redis = ["redis>=5"]`(HA 백엔드), `http = ["uvicorn>=0.30"]`(http 트랜스포트). dev extra: `fakeredis[lua]>=2`(테스트).
 
 ## 🔒 안전 불변식 (이 프로젝트의 핵심 — 절대 깨지 말 것)
@@ -20,6 +20,7 @@ LLM(Claude Desktop/Cursor 등)에 토스 계좌 읽기/거래를 **안전하게*
 server.py     ← MCPServer build_server(version 명시) + transport_kwargs(전송 옵션 seam), run_server(stdio|http 분기), main()
 http.py       ← ASGI 조립 + bearer 미들웨어 (BearerAuthMiddleware / build_http_app / serve_http)
 tools.py      ← AppContext + 툴 함수 fn(app, ...). 라우팅(paper vs real). 테스트는 이 함수 직접 호출
+  ├ conditional.py  조건주문: 요청 검증·명목 계산(pure) + 조건주문 툴 함수·실행 단계(place/modify 가 kind 로 호출)
   ├ safety.py       가드레일 + preview/confirm 토큰 + 멱등성 (pure, 시계 주입)
   ├ paper.py        시뮬 브로커 (즉시체결, Decimal)
   ├ market_hours.py 캘린더 → 개장/휴장 (pure)
@@ -152,7 +153,7 @@ store I/O (`reserve`/`release`/`commit`/`seed`) 중 `ConnectionError`/`Timeout`/
 
 transport는 `stdio`(기본, 단일 클라이언트) 또는 `http`(원격 다중 클라이언트 가능). 다중 인스턴스 redis paper 공유는 가능하나 동시 paper 충돌 시 lock 대기 시간(기본 5s)이 생길 수 있다. 다중 인스턴스 HA = `http` + `redis` 백엔드 조합.
 
-## 15 툴 (`server.py` 등록, `tools.py` 구현)
+## 20 툴 (`server.py` 등록, `tools.py`·`conditional.py` 구현)
 
 - **파라미터 enum**: `side`=`BUY|SELL`, `order_type`=`LIMIT|MARKET`, `time_in_force`=`DAY|CLS|OPG`, `list_orders.status`=`OPEN|CLOSED`(+`cursor` — CLOSED 는 페이지네이션, 응답 `nextCursor` 를 넘김), `currency`=`KRW|USD` (`server.py` `Literal` 별칭 → JSON 스키마 enum, 위반은 SDK 인자검증 `ToolError` 로 모델에 보임). `preview_order` 설명은 정수 `quantity` 우선, `order_amount`(US MARKET 금액·소수점)는 요청 시에만.
 - **읽기(항상)**: `get_accounts`·`get_holdings`(현금 없음 — API 스펙)·**`get_buying_power(currency=None)`**(통화 생략 시 KRW·USD 둘 다, `[{currency, cashBuyingPower}]`; paper 는 paper 현금 버킷, 그 외 `GET /buying-power`. `read_only` 에서도 현금을 볼 수 있는 유일한 경로 — `get_order_readiness` 는 쓰기 쪽이라 read_only 에 없음. 총 예수금은 API 에 없다)·`get_quote`(단일심볼이면 orderbook+trades 동봉)·`get_candles`·`get_stock_info`·`get_market_info`(calendar + 옵션 FX)·`list_orders`·`get_order`
@@ -161,6 +162,23 @@ transport는 `stdio`(기본, 단일 클라이언트) 또는 `http`(원격 다중
   - `modify_order(confirmation_token)` — live 전용. `consume` → `check_guardrails(check_daily=True, prev_notional=spec.prev_notional)` 재검사 → `reserve(signed delta)` → `client.modify_order` → 성공 시 `commit(token)`(delta 영구 반영, 0-하한) / 실패 시 `release(delta)`, 토큰 유지 → 감사(`modified`, notional=delta, currency).
   - `cancel_order(order_id)` — live 전용. 취소 전 원주문 `previousStatus` 를 감사(`canceled`)에 기록.
 - 출력 돈/수량은 전부 **문자열**(`_paper_order_dict`·holdings 등에서 `str()`). 툴 description 에 "string money / 2단계 주문 / live-only" 명시(LLM 가이드).
+
+## 조건주문 (`conditional.py`, 2026-09-30)
+
+감시가에 닿으면 브로커가 스스로 내는 주문(SINGLE / OCO / OTO, `expire_date` 까지). 설계 기록 `docs/superpowers/specs/2026-09-30-conditional-orders-mcp-design.md`.
+
+| 모드 | `list_conditional_orders`·`get_conditional_order` | `preview_conditional_order`·`preview_conditional_modify`·`cancel_conditional_order` |
+|---|---|---|
+| `read_only` | 실계좌 | 미등록 |
+| `paper` | 빈 목록 / `ValueError`(없음) | `PaperError`(live 전용 — paper 엔진은 즉시체결이라 감시 시뮬 없음) |
+| `live` | 실계좌 | 실계좌 |
+
+- **토큰 경로 공유**: preview 가 `build_conditional_spec` 으로 `OrderSpec(kind="conditional", conditional=<build_request 결과 = SDK kwargs>)` 를 만들어 토큰 발급 → **기존 `place_order`/`modify_order`** 가 consume → `check_guardrails(check_daily=False)` → `reserve` 까지 그대로 하고 실행 단계에서만 `conditional.execute_place/execute_modify` 호출 → `_settle_failure`/commit/감사도 공용. 감사는 `placed`/`modified` 에 `kind: "conditional"` 만 붙여 `restore_spend` 가 그대로 센다.
+- **로컬 검증**(`build_request`): 숫자 유한 양수(`invalid-order-value`), `expire_date` ISO 날짜·SINGLE 은 second 금지·OCO/OTO 는 second 필수·LIMIT 은 다리마다 주문가 필수·MARKET 은 주문가 금지(`invalid-order-params`). "OCO 둘 다 SELL"·감시가↔현재가 관계·OCO/OTO LIMIT 전용·종목당 1개 같은 **토스 의미 규칙은 재구현 안 함**(토스 4xx 가 모델에 보임).
+- **명목**: 다리 가격 = `orderPrice`(LIMIT) / `triggerPrice`(MARKET), 다리 금액 = 수량 × 가격. SINGLE = 한 다리, **OCO = 큰 다리**(하나만 발동), **OTO = 두 다리 합**(둘 다 발동). 통화는 시세 통화 → `order_currency` 폴백. 가드레일은 일반 주문과 동일, **장 시간 게이트만 생략**(등록은 아무 때나, 발동은 세션 중).
+- **일일 한도(사용자 결정)**: 등록한 날(KST) **전액** 예약 — 발동 여부 무관. 수정은 `new − old`(old = `get_conditional_order` 상세로 같은 규칙 계산, 가격 없는 다리(앱에서 만든 `PROFIT_RATE` 등)면 old 미상 → 새 금액 전액). **취소는 환급 없음**. 0-하한·확실한-거부 release 규칙 그대로.
+- **멱등성**: 등록은 `clientOrderId` 전달 → 같은 토큰 재시도 안전. 수정은 키가 없어, 반영된 수정을 재시도하면 옛 id 가 4xx → 델타 release(주문 정정과 같은 한계).
+- **라이브 검증 범위**: OCI 는 `read_only` 라 조회만 실측. 쓰기는 실제 조건주문이 걸리므로 라이브로 돌리지 않았다(FakeClient 테스트 + `call_tool` 왕복만).
 
 ## 모듈별 함정 (이미 겪은 것)
 

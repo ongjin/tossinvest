@@ -119,10 +119,11 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 | **`paper`** *(기본)* | ○ | 로컬 시뮬 포트폴리오 체결, **실주문 0** | (기본값) |
 | `live` | ○ | 실주문 | `MODE=live` **+** `ALLOW_LIVE=1` |
 
-## MCP 툴 (15개)
+## MCP 툴 (20개)
 
-- **읽기 (항상):** `get_accounts` · `get_holdings` · `get_buying_power` · `get_quote` · `get_candles` · `get_stock_info` · `get_market_info` · `list_orders` · `get_order`
+- **읽기 (항상):** `get_accounts` · `get_holdings` · `get_buying_power` · `get_quote` · `get_candles` · `get_stock_info` · `get_market_info` · `list_orders` · `get_order` · `list_conditional_orders` · `get_conditional_order`
 - **쓰기 (paper·live):** `get_order_readiness` · **`preview_order` → `place_order`** · **`preview_modify` → `modify_order`** · `cancel_order`
+- **조건주문 쓰기 (live 전용):** **`preview_conditional_order` → `place_order`** · **`preview_conditional_modify` → `modify_order`** · `cancel_conditional_order` — 감시가 도달 시 브로커가 내는 SINGLE/OCO/OTO 주문, 같은 가드레일·확인 토큰·일일 한도(등록일 전액)를 거칩니다
 
 가드레일 한도·종목 allow/deny·시작 현금 등은 전부 env 로 조절합니다 → [`pytossinvest-mcp/README.md`](pytossinvest-mcp/README.md).
 

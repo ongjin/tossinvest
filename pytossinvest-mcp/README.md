@@ -144,7 +144,7 @@ docker compose up --build
 
 ---
 
-## 15개 툴
+## 20개 툴
 
 입출력의 돈·수량은 **전부 문자열**(JSON/Decimal 안전). 툴 설명(description)에도 string-money / 2단계 주문 / live-only 제약이 명시돼 있어 LLM 이 올바르게 호출합니다.
 
@@ -161,6 +161,8 @@ docker compose up --build
 | `get_market_info` | `(country='KR', base_currency=None, quote_currency=None)` | 시장 캘린더. 통화쌍 주면 환율 동봉 |
 | `list_orders` | `(status='OPEN', symbol=None, cursor=None)` | `OPEN`(미체결, 한 번에 전부) 또는 `CLOSED`(체결·취소, 페이지 단위 — 응답의 `nextCursor` 를 `cursor` 로 넘김). paper 는 시뮬 주문 |
 | `get_order` | `(order_id)` | 주문 상세 |
+| `list_conditional_orders` | `(status='OPEN', symbol=None, cursor=None)` | 조건주문 목록(`OPEN`=감시·주문중, `CLOSED`=완료·만료, 페이지 단위). 앱에서 만든 것도 포함. paper 는 빈 목록 |
+| `get_conditional_order` | `(conditional_order_id)` | 조건주문 상세(조건별 상태, 발동돼 생긴 주문 id) |
 
 > **시세 툴(`get_quote`·`get_candles`·`get_stock_info`·`get_market_info`)은 모드와 무관하게 항상 실제 client 를 씁니다** — 시세는 계좌와 무관하니까요. 계좌 읽기(`get_accounts`·`get_holdings`·`get_buying_power`·`list_orders`·`get_order`)만 paper 모드에서 시뮬로 라우팅됩니다.
 
@@ -174,6 +176,9 @@ docker compose up --build
 | `preview_modify` | `(order_id, order_type, price=None, quantity=None, confirm_high_value_order=False)` | **정정 STEP 1/2** (**live 전용**). 원주문 조회 → 정정 후 notional 로 가드레일 검사 → `confirmationToken`. 정정 안 함 |
 | `modify_order` | `(confirmation_token)` | **정정 STEP 2/2** (**live 전용**). 토큰으로 정정 실행, 새 orderId 반환. 멱등 |
 | `cancel_order` | `(order_id)` | 취소 (**live 전용**, 새 orderId 반환). 취소 전 원주문 상태를 감사 로그에 기록 |
+| `preview_conditional_order` | `(symbol, type, quantity, order_type, expire_date, first_side, first_trigger_price, first_order_price=None, second_side=None, second_trigger_price=None, second_order_price=None, confirm_high_value_order=False)` | **조건주문 STEP 1/2** (**live 전용**). `type`=SINGLE/OCO/OTO. 가드레일 검사 후 토큰 발급 → `place_order` 로 등록. 금액은 SINGLE 한 조건·OCO 큰 쪽·OTO 합, **등록일 한도에서 전액 차감** |
+| `preview_conditional_modify` | `(conditional_order_id, <위와 같음, symbol 없음>)` | **조건주문 정정 STEP 1/2** (**live 전용**). 전체 재설정 → `modify_order` 로 실행, 새 id 반환. 한도는 증감분만 |
+| `cancel_conditional_order` | `(conditional_order_id)` | 조건주문 취소 (**live 전용**). 한도 환급 없음 |
 
 ---
 
