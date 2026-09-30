@@ -45,7 +45,7 @@ TossInvestClient(client_id, client_secret, *,
 ### `_request` 오케스트레이션 (`client.py`)
 
 1. `_gate(group)` — 그룹 토큰버킷에서 토큰 획득까지 `sleep`. 피크시간(09:00–09:10 KST)엔 `effective_rate` 로 ORDER/ORDER_INFO 버킷 반토막(단, 해당 그룹이 헤더를 한 번이라도 받은 뒤엔 피크반토막 미적용).
-2. `Authorization: Bearer {token}` (TokenManager). `account=True` 면 `X-Tossinvest-Account: {accountSeq}` (없으면 RuntimeError → `get_accounts()` 먼저 호출 강제).
+2. `Authorization: Bearer {token}` (TokenManager). `account=True` 면 `X-Tossinvest-Account: {accountSeq}` — 아직 없으면 **그 자리에서 `get_accounts()` 로 첫 계좌를 캐싱**(계좌가 하나도 없을 때만 `RuntimeError`). 2026-09-30 전엔 `get_accounts()` 선호출을 `RuntimeError` 로 강제했는데, mcp 2.1+ 가 예외 텍스트를 가려 MCP 의 계좌 툴이 이유 없이 실패했다.
 3. **응답 직후(상태코드 분기 전) → 응답 헤더로 해당 그룹 버킷 동기화(`_sync_bucket_from_headers`)**. 이어 200 이면 `resp.json()["result"]` 언래핑 반환.
 4. **401 + `code` ∈ `_REISSUE_TOKEN_CODES`(`expired-token`·`token-revoked`) → `token.invalidate()` 후 1회 재시도**(429 카운터 보존). `token-revoked` 는 토스가 client 당 토큰 1개만 살려 두기 때문 — 같은 키로 다른 프로세스가 발급하면 이쪽 토큰이 죽는다(두 프로세스가 번갈아 쓰면 호출마다 재발급 핑퐁, `AUTH` 5/s).
 5. **429 + 잔여 시도 있음 → `backoff_wait(attempt, retry_after)` 만큼 sleep 후 같은 요청 재시도**(`_attempt` 파라미터로 횟수 추적). 소진 시 `RateLimitError` 던짐. **5xx·타임아웃은 재시도 안 함**.
