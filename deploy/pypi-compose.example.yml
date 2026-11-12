@@ -1,0 +1,22 @@
+# deploy/pypi-compose.example.yml — copy to <DEPLOY_DIR>/docker-compose.yml on the server once.
+# One container running the PyPI build with in-memory state (no Redis). deploy/remote.sh then
+# replaces only the tag on the image line below.
+services:
+  tossinvest-mcp:
+    image: tossinvest-mcp:pypi-mcp0.0.3-sdk0.0.4
+    build:
+      context: ./pypi
+      dockerfile: Dockerfile
+    # TOSSINVEST_AUTH_TOKEN, TOSSINVEST_CLIENT_ID, TOSSINVEST_CLIENT_SECRET. chmod 600, never commit.
+    env_file: ./toss.env
+    environment:
+      TOSSINVEST_TRANSPORT: http
+      TOSSINVEST_HTTP_HOST: 0.0.0.0
+      TOSSINVEST_HTTP_PORT: "8000"
+      TOSSINVEST_MODE: read_only
+      TOSSINVEST_STATE_BACKEND: memory
+    # Published on localhost only. Put a TLS-terminating proxy in front, or drop this and
+    # attach the service to the network of the client that uses it.
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped

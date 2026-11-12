@@ -1,2 +1,4 @@
 # never commit the real env file (it holds the bearer token + live Toss keys)
 .env
+# where deploy/remote.sh deploys to (names a private server)
+remote.env

@@ -94,6 +94,8 @@ docker compose up --build
 # → MCP Streamable-HTTP at http://localhost:8000/mcp  (Authorization: Bearer <token>)
 ```
 
+> 서버에 저장소 소스를 두지 않고 **PyPI 배포본으로 이미지를 만들어 올리는 방법**도 있습니다. `deploy/remote.sh` 한 줄이 백업·빌드·사전 검사·교체·검증을 하고, 새 컨테이너가 검증을 통과하지 못하면 이전 것으로 되돌립니다. 절차는 [`docs/wiki/deploy.md`](../docs/wiki/deploy.md).
+
 ### 필수 사항
 
 - **`TOSSINVEST_AUTH_TOKEN` 필수** — 이 값 없이는 http 모드로 서버가 부팅을 거부합니다. `.env.example` 을 `.env` 로 복사하고 충분히 긴 랜덤 값으로 설정하세요. **실제 `.env` 는 절대 커밋하지 마세요.**
