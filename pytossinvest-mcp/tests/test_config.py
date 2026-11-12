@@ -175,6 +175,37 @@ def test_account_seq_setting_reaches_the_sdk_client(monkeypatch, account_seq):
 def test_confirmation_ttl_cannot_outlive_the_broker_idempotency_window():
     # a same-token retry after the broker forgot the clientOrderId (10 minutes) would be
     # a second order that the reservation dedup counts only once
-    assert _settings(confirmation_ttl_sec=600).confirmation_ttl_sec == 600
+    # ... and the retry itself can be held up (rate-limit backoff), so half the window is
+    # left for it
+    assert _settings(confirmation_ttl_sec=300).confirmation_ttl_sec == 300
     with pytest.raises(ValueError):
-        _settings(confirmation_ttl_sec=601)
+        _settings(confirmation_ttl_sec=301)
+
+
+def _client_kwargs(monkeypatch, **settings):
+    from pytossinvest_mcp.server import build_client
+    seen = {}
+
+    class Recorder:
+        def __init__(self, *args, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr("pytossinvest.TossInvestClient", Recorder)
+    build_client(_settings(**settings))
+    return seen
+
+
+def test_redis_backend_shares_the_access_token_between_instances(monkeypatch):
+    fakeredis = pytest.importorskip("fakeredis")
+    import pytossinvest_mcp.server as server
+    from pytossinvest_mcp.token_cache import RedisTokenCache
+    monkeypatch.setattr(server, "_redis_from_url",
+                        lambda url: fakeredis.FakeStrictRedis(decode_responses=True))
+
+    seen = _client_kwargs(monkeypatch, state_backend="redis", redis_url="redis://x")
+
+    assert isinstance(seen["token_cache"], RedisTokenCache)
+
+
+def test_memory_backend_keeps_the_access_token_in_process(monkeypatch):
+    assert _client_kwargs(monkeypatch)["token_cache"] is None

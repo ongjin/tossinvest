@@ -24,7 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "fakeredis[lua]>=2"]
-redis = ["redis>=5"]
+redis = ["redis>=5", "cryptography>=42"]
 http = ["uvicorn>=0.30"]
 
 [project.urls]

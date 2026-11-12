@@ -650,11 +650,13 @@ http = [
     { name = "uvicorn" },
 ]
 redis = [
+    { name = "cryptography" },
     { name = "redis" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", marker = "extra == 'redis'", specifier = ">=42" },
     { name = "fakeredis", extras = ["lua"], marker = "extra == 'dev'", specifier = ">=2" },
     { name = "mcp", specifier = ">=2.0.0,<3" },
     { name = "pydantic-settings", specifier = ">=2" },
