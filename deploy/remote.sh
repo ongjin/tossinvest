@@ -108,7 +108,8 @@ send_files() {
     local dir unpack
     dir="$(printf '%q' "$DEPLOY_DIR")"
     unpack="cd && cd $dir && rm -rf $INCOMING && mkdir $INCOMING && tar -C $INCOMING -xf -"
-    COPYFILE_DISABLE=1 tar -C "$HERE" -cf - pypi/Dockerfile pypi/requirements.in pypi/requirements.txt preflight.py \
+    # --no-xattrs: macOS tags files with extended attributes that the server's tar warns about
+    tar --no-xattrs -C "$HERE" -cf - pypi/Dockerfile pypi/requirements.in pypi/requirements.txt preflight.py \
         | if [ "$DEPLOY_HOST" = "$LOCAL_HOST" ]; then bash -c "$unpack"; else ssh -o BatchMode=yes "$DEPLOY_HOST" "$unpack"; fi
 }
 
