@@ -32,9 +32,10 @@ money.py      문자열 ↔ Decimal, **float 거부** (pure, 모든 돈 변환�
 TossInvestClient(client_id, client_secret, *,
                  base_url="https://openapi.tossinvest.com", timeout=10.0,
                  sleep=time.sleep, monotonic=time.monotonic, now_kst=lambda: datetime.now(KST),
-                 max_retries=3, retry_max_wait=60.0, rng=random.random, account_seq=None)
+                 max_retries=3, retry_max_wait=60.0, rng=random.random, account_seq=None,
+                 token_cache=None)
 ```
-주입 가능한 `sleep`/`monotonic`/`now_kst` 는 **테스트 결정성**용(레이트리밋 대기·피크시간 등). `max_retries`/`retry_max_wait`/`rng` 는 **429 bounded 재시도** 제어용(`max_retries=0` 이면 즉시 `RateLimitError`, `retry_max_wait` 는 백오프 상한이자 레이트 게이트 대기 상한, `rng` 는 jitter 테스트 결정성용). `account_seq` 는 계좌 지정용이다. 주면 계좌헤더에 그 값을 쓰고 `get_accounts()` 를 부르지 않으며, 생략하면 `get_accounts()` 의 첫 계좌를 쓴다. 컨텍스트매니저(`with`) 지원, `close()`.
+주입 가능한 `sleep`/`monotonic`/`now_kst` 는 **테스트 결정성**용(레이트리밋 대기·피크시간 등). `max_retries`/`retry_max_wait`/`rng` 는 **429 bounded 재시도** 제어용(`max_retries=0` 이면 즉시 `RateLimitError`, `retry_max_wait` 는 백오프 상한이자 레이트 게이트 대기 상한, `rng` 는 jitter 테스트 결정성용). `account_seq` 는 계좌 지정용이다. 주면 계좌헤더에 그 값을 쓰고 `get_accounts()` 를 부르지 않으며, 생략하면 `get_accounts()` 의 첫 계좌를 쓴다. `token_cache` 는 한 client id 를 쓰는 여러 프로세스가 토큰을 공유하게 하는 seam 이다(아래 '프로세스 간 토큰 공유'). 컨텍스트매니저(`with`) 지원, `close()`.
 
 HTTP 연결은 `_HTTP_LIMITS` 로 유휴 60초까지 재사용한다. httpx 기본값은 5초라, 툴콜처럼 간격이 긴 호출이 매번 TCP+TLS 핸드셰이크를 새로 치렀다. 연결 수 상한 두 값은 httpx 클라이언트 기본값을 그대로 적은 것이다(`httpx.Limits()` 만 넘기면 상한이 사라진다).
 
@@ -52,7 +53,7 @@ HTTP 연결은 `_HTTP_LIMITS` 로 유휴 60초까지 재사용한다. httpx 기�
 1. `_gate(group)` — 그룹 토큰버킷에서 토큰 획득까지 `sleep`. 피크시간(09:00–09:10 KST)엔 `effective_rate` 로 ORDER/ORDER_INFO 버킷 반토막(단, 해당 그룹이 헤더를 한 번이라도 받은 뒤엔 피크반토막 미적용). 토큰 발급(`/oauth2/token`)은 게이트를 타지 않는다.
 2. `Authorization: Bearer {token}` (TokenManager). `account=True` 면 `X-Tossinvest-Account: {accountSeq}` — 아직 없으면 **그 자리에서 `get_accounts()` 로 첫 계좌를 캐싱**(계좌가 하나도 없을 때만 `RuntimeError`). 여러 스레드가 동시에 도착해도 조회는 한 번이다(`_account_lock`). 2026-09-30 전엔 `get_accounts()` 선호출을 `RuntimeError` 로 강제했는데, mcp 2.1+ 가 예외 텍스트를 가려 MCP 의 계좌 툴이 이유 없이 실패했다.
 3. **응답 직후(상태코드 분기 전) → 응답 헤더로 해당 그룹 버킷 동기화(`_sync_bucket_from_headers`)**. 이어 200 이면 `resp.json()["result"]` 언래핑 반환(본문이 JSON 이 아니면 `invalid-response`, JSON 객체가 아니거나 `result` 가 없으면 `missing-result`), **204 는 `None`**(조건주문 DELETE — 본문도 envelope 도 없음. 이전엔 비2xx 로 떨어져 에러가 됐을 경로).
-4. **401 + `code` ∈ `_REISSUE_TOKEN_CODES`(`expired-token`·`token-revoked`) → `token.invalidate(token)` 후 1회 재시도**(429 카운터 보존). 넘긴 `token` 은 이 요청이 실어 보낸 토큰이다. `token-revoked` 는 토스가 client 당 토큰 1개만 살려 두기 때문 — 같은 키로 다른 프로세스가 발급하면 이쪽 토큰이 죽는다(두 프로세스가 번갈아 쓰면 호출마다 재발급 핑퐁, `AUTH` 5/s).
+4. **401 + `code` ∈ `_REISSUE_TOKEN_CODES`(`expired-token`·`token-revoked`) → `token.invalidate(token)` 후 재발급해 재시도, 최대 2회(`_MAX_TOKEN_REISSUES`)**(429 카운터 보존). 넘긴 `token` 은 이 요청이 실어 보낸 토큰이다. 재발급한 토큰이 재시도가 닿기 전에 또 죽는 건 같은 키로 다른 프로세스도 발급하고 있다는 뜻이라, 둘째 재발급 전에는 짧은 jitter(`_REISSUE_JITTER_SEC`) 만큼 쉬어 서로 엇갈리게 한다. `token-revoked` 는 토스가 client 당 토큰 1개만 살려 두기 때문 — 같은 키로 다른 프로세스가 발급하면 이쪽 토큰이 죽는다(두 프로세스가 번갈아 쓰면 호출마다 재발급 핑퐁, `AUTH` 5/s).
 5. **429 + 잔여 시도 있음 → `backoff_wait(attempt, retry_after)` 만큼 sleep 후 같은 요청 재시도**(`_attempt` 파라미터로 횟수 추적). 소진 시 `RateLimitError` 던짐. **5xx·타임아웃은 재시도 안 함**.
 6. 그 외 비2xx → `error_from_response(status, body, headers)` 던짐.
 
@@ -64,15 +65,25 @@ HTTP 연결은 `_HTTP_LIMITS` 로 유휴 60초까지 재사용한다. httpx 기�
 - `TossInvestClient._account_lock`: 첫 `get_accounts()` 조회를 한 번으로 묶는다. `ACCOUNT` 는 1/s 라 조회가 겹치면 초 단위로 줄을 선다.
 - `TossInvestClient._rate_lock`: 버킷과 `_rate_from_header` 를 지킨다. `TokenBucket` 자체에는 락이 없다. 게이트의 `sleep` 은 락 밖에서 한다.
 
-클라이언트에 가변 상태를 더하면 같은 방식으로 락을 건다. 같은 키를 쓰는 **다른 프로세스**가 토큰을 발급해 생기는 revoke 는 SDK 가 막지 못하고, 4번의 401 재시도로 복구한다.
+클라이언트에 가변 상태를 더하면 같은 방식으로 락을 건다.
+
+### 프로세스 간 토큰 공유
+
+락은 한 프로세스 안에서만 통한다. 같은 키를 쓰는 다른 프로세스가 토큰을 발급하면 이쪽 토큰이 죽는다. `token_cache`(`auth.TokenCache` 프로토콜: `lock()`·`load()`·`save(token, ttl_sec)`·`discard(token)`)를 주면 프로세스끼리 토큰 하나를 같이 쓴다.
+
+- `get_token()` 은 로컬 토큰이 없거나 만료됐을 때만 캐시를 본다. 캐시의 `lock()` 안에서 `load()` 하고, 있으면 남은 수명만큼 그대로 쓰며, 없으면 발급해 `save()` 한다. 발급은 프로세스를 통틀어 한 번에 하나다.
+- `invalidate(token)` 은 공유 캐시에도 같은 규칙을 적용한다(`discard` 는 저장된 토큰이 그 토큰일 때만 지운다). 다른 프로세스가 이미 새 토큰을 넣어 두었으면 다음 `get_token()` 이 그것을 가져온다.
+- API 가 거부한 토큰은 캐시에 남아 있어도 다시 가져오지 않는다. 마지막으로 거부된 토큰(`_rejected`)과, 캐시가 그 토큰을 계속 내놓을 때의 그 항목(`_stuck`)을 기억한다. 캐시를 읽을 수는 있는데 쓸 수 없는 상황(읽기 전용 복제본, 메모리 한도)에서 죽은 토큰을 번갈아 집어 오는 것을 막는다.
+- 만료 버퍼를 빼고 남은 수명이 0 이하인 토큰은 저장하지 않는다.
+
+SDK 는 프로토콜만 정의한다. 구현은 `pytossinvest-mcp` 의 `RedisTokenCache`(redis, 암호화 저장)다. 캐시를 공유하지 않는 프로세스끼리는 여전히 서로의 토큰을 죽이고, 그때는 4번의 재발급 재시도로 버틴다.
 
 ### 경로에 들어가는 값
 
 주문 id·조건주문 id·심볼·국가코드는 `_path_seg()` 를 거쳐 경로에 들어간다. 호출자가 준 값(MCP 뒤에서는 LLM 이 채운 값)이 다른 엔드포인트를 고르지 못하게 하려는 것이다.
 
-- `/`, `?`, `#` 등은 퍼센트 인코딩되어 값이 경로 세그먼트 하나로 남는다. `BRK.B` 같은 평범한 값은 그대로 나간다.
-- `""`, `.`, `..` 는 요청을 보내기 전에 `ValueError` 로 거부한다. 인코딩으로는 막을 수 없는 값이다(`.`·`..` 은 httpx 가 경로 이동으로 풀고, 빈 값은 세그먼트를 없앤다).
-- 서버가 `%2F` 를 디코딩한 뒤 경로를 다시 정규화하는지는 클라이언트가 통제할 수 없다.
+- 경로 구조를 바꿀 수 있는 값은 인코딩하지 않고 요청 전에 `ValueError` 로 거부한다: `""`·`.`·`..`, 그리고 `/` `\` `%` `?` `#` `;`, 공백, 제어문자가 든 값. 인코딩해서 보내면 서버나 프록시가 `%2F` 를 다시 디코딩해 경로를 정규화하는지에 결과가 달려 있는데, 그건 클라이언트가 알 수 없다. 정상적인 id·심볼에는 이 문자들이 없다.
+- 그 밖의 예약 문자(`:` `=` `+` `@` `&` 등)는 퍼센트 인코딩한다. `BRK.B`, `KR_BOND_2Y` 같은 평범한 값은 그대로 나간다.
 
 ## 모듈별 핵심 + 함정
 
@@ -80,12 +91,12 @@ HTTP 연결은 `_HTTP_LIMITS` 로 유휴 60초까지 재사용한다. httpx 기�
 - **`models.py`**: `Money = Annotated[Decimal, BeforeValidator(to_decimal)]` — pydantic 이 문자열→Decimal 강제하고 float 거부. `_Base` 는 `populate_by_name=True, extra="ignore"`(서버가 필드 추가해도 안 깨짐). 모델: `Account`(account_no/account_seq/account_type)·`Price`(last_price:Money)·`BuyingPower`(cash_buying_power:Money)·`OrderResponse`(order_id/client_order_id?)·`HoldingsItem`.
 - **`errors.py`**: `error_from_response` 가 **status→예외클래스** 매핑(400 Validation·401 Auth·403 Forbidden·404 NotFound·409 Conflict·422 BusinessRule·429 RateLimit). **모르는 status 는 ≥500 → ServerError, 그 외 → base `TossInvestError`**(안 깨짐). `code` 는 항상 문자열이고 기본값 `"unknown"`(문자열이 아닌 값이 오면 `"unknown"` — 호출자가 `code in {...}` 로 분기하므로). 본문이 표준 모양이 아니어도(JSON 문자열·배열, `error` 가 문자열인 게이트웨이 응답) status 로 고른 클래스에 `code="unknown"` 으로 떨어지고 `AttributeError` 를 내지 않는다. 토큰 엔드포인트만 `oauth_error_from_response`(OAuth2 포맷). `RateLimitError.retry_after` 는 429 의 `Retry-After` 헤더에서만 파싱.
 - **`ratelimit.py`**: `TokenBucket(capacity, refill_per_sec, now)` — `try_acquire(n=1)`/`time_until_available(n=1)`. `effective_rate(group, base, now_kst)` 가 `PEAK_GROUPS={ORDER, ORDER_INFO}` 를 09:00–09:10 KST 동안 반토막. **v0.0.2 구현**: `backoff_wait(attempt, retry_after, *, base=1.0, cap, rng)` 헬퍼(`Retry-After>0` 이면 그대로, 아니면 지수백오프+full jitter, `cap` 상한); `_sync_bucket_from_headers(group, headers)` 가 `X-RateLimit-Limit`→capacity, `1/X-RateLimit-Reset`→refill_per_sec, `min(_tokens, X-RateLimit-Remaining)`→_tokens 로 버킷 동기화, 헤더 없거나 파싱 불가면 no-op. 토큰을 영영 내주지 못할 값(비유한, `Limit<1`, 음수)도 무시한다(받아들이면 게이트가 무한 루프나 0 나눗셈에 빠진다). 재충전 주기는 `retry_max_wait` 로 잘라서, 게이트 대기가 그보다 길어질 상황이면 그냥 보내고 유계인 429 재시도 경로에 맡긴다; 그룹별 `_rate_from_header` 플래그 — 헤더를 한 번 받은 그룹은 `_gate` 에서 피크반토막 미적용(헤더가 진실).
-- **`auth.py`**: `TokenManager.get_token()` 이 `expires_in - 30s` 버퍼까지 메모리 캐싱. `invalidate(token=None)` 로 강제 재발급(client 의 401 재시도가 실패한 토큰을 넘겨 호출, 인자 없이 부르면 무조건 버림). `_fetch` 는 form-urlencoded, 비200 이면 `OAuthError`, 200 인데 본문이 깨졌으면(`access_token`·`expires_in` 누락, 비-JSON) `OAuthError("invalid-response")`. 락 동작은 위 '스레드 공유'.
+- **`auth.py`**: `TokenManager.get_token()` 이 `expires_in - 30s` 버퍼까지 메모리 캐싱. `invalidate(token=None)` 로 강제 재발급(client 의 401 재시도가 실패한 토큰을 넘겨 호출, 인자 없이 부르면 무조건 버림). `cache=` 로 `TokenCache` 를 받으면 프로세스 간 공유(위 '프로세스 간 토큰 공유'). `_fetch` 는 form-urlencoded, 비200 이면 `OAuthError`, 200 인데 본문이 깨졌으면(`access_token`·`expires_in` 누락, 비-JSON) `OAuthError("invalid-response")`. 락 동작은 위 '스레드 공유'.
 
 ## 새 엔드포인트 추가 절차
 
 1. (코어면) `models.py` 에 decimal-safe 모델 추가(돈 필드는 `Money`).
-2. `client.py` 에 메서드 추가 — `self._request(method, path, group=..., account=True/False, params/json=...)`. 그룹은 `_GROUP_RATES` 키(없으면 추가). 계좌컨텍스트면 `account=True`. 경로에 호출자 값을 넣을 땐 `_path_seg()` 로 감싼다.
+2. `client.py` 에 메서드 추가 — `self._request(method, path, group=..., account=True/False, params/json=...)`. 그룹은 `_GROUP_RATES` 키(없으면 추가). 계좌컨텍스트면 `account=True`. 경로에 호출자 값을 넣을 땐 `_path_seg()` 로 감싼다. 테스트 파일 이름은 MCP 쪽 `tests/` 와 겹치지 않게 짓는다(루트에서 두 스위트를 한 세션으로 돌린다).
 3. 코어면 모델 검증, 얇으면 `result` 그대로 반환.
 4. 필요 시 `__init__.py` export 추가.
 5. respx mock 테스트(fixture 응답) — 라이브 키 없이. **TDD**: 실패 테스트 먼저.
@@ -93,4 +104,5 @@ HTTP 연결은 `_HTTP_LIMITS` 로 유휴 60초까지 재사용한다. httpx 기�
 
 ## 이력
 
+- 2026-11-12 경로 값을 인코딩에서 거부로 변경(`/ \ % ? # ;`·공백·제어문자). 토큰 재발급 재시도를 1회에서 2회로, `TokenCache` seam 추가(`token_cache=`).
 - 2026-11-12 스레드 공유 지원(토큰 발급을 락으로 한 번에 묶음, `invalidate(token)`, 계좌 조회·버킷 락). 그전엔 MCP 병렬 툴콜 4개 중 3개가 `token-revoked` 로 실패했다. 경로 값 인코딩(`_path_seg`), 비표준 에러 본문·토큰 응답 처리, 레이트리밋 헤더 검증과 게이트 대기 상한, `account_seq` 옵션, `to_decimal` 비유한값 거부 추가. keepalive 60초(실측: 새 연결 53ms 중 핸드셰이크 39ms, 재사용 약 15ms, 서버는 유휴 130초까지 연결 유지). 쓰이지 않던 `AUTH` 버킷과 `_request(data=)` 제거.

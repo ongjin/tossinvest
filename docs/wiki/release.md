@@ -11,7 +11,7 @@
 
 ## 단계
 
-1. 버전을 올린다. 패키지마다 세 곳이다: `pyproject.toml` 의 `version`, `src/<모듈>/__init__.py` 의 `__version__`, `tests/test_smoke.py` 의 기대값.
+1. 버전을 올린다. 패키지마다 세 곳이다: `pyproject.toml` 의 `version`, `src/<모듈>/__init__.py` 의 `__version__`, 스모크 테스트의 기대값(SDK 는 `tests/test_smoke.py`, MCP 는 `tests/test_mcp_smoke.py`).
 2. MCP 가 SDK 의 새 기능을 쓰면 `pytossinvest-mcp/pyproject.toml` 의 `pytossinvest>=` 하한을 그 SDK 버전으로 올린다.
 3. 락파일을 맞춘다.
 

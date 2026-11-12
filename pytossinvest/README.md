@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-MIT-3da639)
-![tests](https://img.shields.io/badge/tests-134%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-148%20passing-2ea44f)
 ![status](https://img.shields.io/badge/Toss%20API-available-2ea44f)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -25,7 +25,7 @@
 | 🔁 **멱등성** | `clientOrderId` 로 중복주문 방지 — 네트워크 단절로 응답을 못 받아도 같은 키로 재시도하면 두 번 체결되지 않음(서버측 ~10분 유효). |
 | 🧩 **에러는 `code` 로 분기** | `message` 가 비어도 OK. 서버가 **모르는 code/enum 을 추가해도 안 깨짐**(관용적 파싱). |
 | 🔐 **토큰 생애주기** | 만료 30초 전까지 메모리 캐싱·자동 갱신(`expires_in` 이 30초 이하라도 과거 시각으로 뭉개지지 않게 `max(0, …)` 클램프), `401 expired-token`·`token-revoked`(같은 키로 다른 프로세스가 토큰을 받으면 이전 토큰 무효) 시 1회 재발급 후 재시도. |
-| ✅ **라이브 키 없이 그린** | `pytest` → **134개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
+| ✅ **라이브 키 없이 그린** | `pytest` → **148개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
 
 ---
 
@@ -106,6 +106,7 @@ TossInvestClient(
     retry_max_wait=60.0,       # 재시도 백오프 상한 (초)
     rng=random.random,         # jitter 주입 — 테스트 결정성용
     account_seq=None,          # 계좌 지정 (생략 시 get_accounts() 의 첫 계좌)
+    token_cache=None,          # 프로세스 간 토큰 공유 (pytossinvest.auth.TokenCache 구현체)
 )
 ```
 
@@ -114,6 +115,8 @@ TossInvestClient(
 계좌가 둘 이상이면 `account_seq` 로 주문·잔고 조회에 쓸 계좌를 고르세요(`get_accounts()` 의 `Account.account_seq`). 생략하면 첫 계좌를 씁니다.
 
 클라이언트 하나를 **여러 스레드가 공유해도 됩니다**. 토큰 발급은 락으로 한 번에 묶여 있어, 동시 호출이 서로의 토큰을 revoke 하지 않습니다(토스는 client 당 유효 토큰이 1개). 유휴 연결은 60초까지 재사용합니다.
+
+**여러 프로세스**가 같은 키를 쓰면 프로세스끼리는 여전히 서로의 토큰을 죽입니다. `token_cache` 에 `pytossinvest.auth.TokenCache`(`lock`·`load`·`save`·`discard`) 구현체를 주면 한 프로세스만 발급하고 나머지는 그 토큰을 씁니다. `pytossinvest-mcp` 는 redis 백엔드에서 이를 자동으로 씁니다.
 
 ### 메서드
 
@@ -213,11 +216,11 @@ asyncio.run(main())
 2. **인증** — `Authorization: Bearer {token}` (TokenManager 가 캐싱·갱신).
 3. **계좌 헤더** — `account=True` 엔드포인트는 `X-Tossinvest-Account: {accountSeq}` 부착. `accountSeq` 가 아직 없으면 **첫 호출이 알아서 `get_accounts()` 로 첫 계좌를 캐싱**합니다(계좌가 없을 때만 `RuntimeError`). 생성자에 `account_seq` 를 줬으면 그 값을 쓰고 조회하지 않습니다.
 4. **버킷 동기화 + 언래핑** — 응답을 받으면 (상태코드 무관) 헤더로 버킷 동기화. 이어 `200` 이면 `resp.json()["result"]` 를 반환(토큰 엔드포인트 제외), `204`(조건주문 취소)는 `None`. 바디가 **비-JSON·과도하게 중첩된 JSON(`RecursionError`)이거나, JSON 객체가 아니거나 `result` 키가 없으면** `TossInvestError`(`invalid-response` / `missing-result`)로 거부 — `None` 을 조용히 순회하다 `TypeError` 로 깨지지 않게.
-5. **401 재시도** — `code` 가 `expired-token` 또는 `token-revoked` 면 토큰을 무효화하고 **1회** 재발급 후 재시도(429 카운터 보존). 토스는 client 당 유효 토큰이 1개라, 같은 키를 쓰는 다른 프로세스가 토큰을 받으면 이쪽 토큰이 `token-revoked` 가 됩니다.
+5. **401 재시도** — `code` 가 `expired-token` 또는 `token-revoked` 면 토큰을 무효화하고 재발급 후 재시도, **최대 2회**(429 카운터 보존). 토스는 client 당 유효 토큰이 1개라, 같은 키를 쓰는 다른 프로세스가 토큰을 받으면 이쪽 토큰이 `token-revoked` 가 됩니다.
 6. **429 bounded 재시도** — 잔여 시도 횟수가 있으면 `backoff_wait`(`Retry-After` 헤더가 있으면 그 값, 없으면 지수백오프+jitter) 만큼 sleep 후 같은 요청을 재시도. `max_retries` 소진 시 `RateLimitError` 던짐. **5xx·타임아웃은 재시도 안 함**.
 7. 그 외 비2xx → `code` 기반 예외로 변환해 raise. 게이트웨이가 준 비표준 본문(JSON 문자열·배열, `error` 가 문자열)이어도 status 에 맞는 예외에 `code="unknown"` 으로 올라옵니다.
 
-주문 id·심볼처럼 **URL 경로에 들어가는 인자**는 한 세그먼트로 인코딩됩니다(`/`·`?`·`#` 등). `""`·`.`·`..` 는 요청 전에 `ValueError` 로 거부합니다. 인자를 LLM 이 채우는 환경에서 값 하나가 다른 엔드포인트를 가리키지 못하게 하기 위한 것입니다.
+주문 id·심볼처럼 **URL 경로에 들어가는 인자**는 경로 구조를 바꿀 수 있으면 요청 전에 `ValueError` 로 거부합니다: `""`·`.`·`..`, 그리고 `/` `\` `%` `?` `#` `;`·공백·제어문자가 든 값. 인자를 LLM 이 채우는 환경에서 값 하나가 다른 엔드포인트를 가리키지 못하게 하기 위한 것입니다. 그 밖의 예약 문자는 퍼센트 인코딩합니다.
 
 ### 돈 / Decimal 규약 (`money.py`)
 
@@ -294,7 +297,7 @@ except BusinessRuleError as e:
 ## 테스트
 
 ```bash
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 134 passing
+uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 148 passing
 ```
 
 `respx` 로 httpx 를 mock 합니다 — **라이브 키 불필요, 네트워크 0**. `git clone && uv sync && pytest` 면 그린.
