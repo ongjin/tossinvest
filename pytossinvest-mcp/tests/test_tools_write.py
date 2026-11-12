@@ -644,3 +644,55 @@ def test_retry_whose_reservation_cannot_be_logged_keeps_the_earlier_reservation(
         T.place_order(app, confirmation_token=token)
 
     assert _fresh_600k_fits(app) is False
+
+
+# --- send deadline: every attempt of a token re-uses one clientOrderId, which the broker
+# --- deduplicates for 10 minutes only
+
+def test_order_is_sent_with_the_time_left_before_the_broker_forgets_its_key(app_factory, fake_client):
+    app = _live_cap_app(app_factory)  # the test clock stands at 1000.0
+    token = _preview_600k(app)
+    app.safety._now = lambda: 1100.0  # 100s after the preview
+
+    T.place_order(app, confirmation_token=token)
+
+    # 600s window - 30s margin - 100s already gone
+    assert fake_client.place_payloads[-1]["send_within"] == 470.0
+
+
+def _out_of_time(**kwargs):
+    from pytossinvest.errors import SendDeadlineError
+    raise SendDeadlineError("send-deadline-exceeded", "")
+
+
+def test_first_attempt_that_ran_out_of_time_before_sending_releases(app_factory, fake_client):
+    # the SDK gave up before sending, and whatever it sent earlier in that call was refused
+    app = _live_cap_app(app_factory)
+    token = _preview_600k(app)
+    fake_client.place_order = _out_of_time
+
+    with pytest.raises(GuardrailError, match="send-deadline-exceeded"):
+        T.place_order(app, confirmation_token=token)
+
+    assert _fresh_600k_fits(app) is True
+
+
+def test_retry_that_ran_out_of_time_keeps_the_earlier_reservation(app_factory, fake_client):
+    from pytossinvest.errors import ServerError
+    app = _live_cap_app(app_factory)
+    token = _preview_600k(app)
+
+    def unknown(**kwargs):
+        raise ServerError("internal-error", "", http_status=503)  # may have filled
+    fake_client.place_order = unknown
+    with pytest.raises(ServerError):
+        T.place_order(app, confirmation_token=token)
+
+    fake_client.place_order = _out_of_time
+    with pytest.raises(GuardrailError, match="send-deadline-exceeded") as refused:
+        T.place_order(app, confirmation_token=token)
+
+    assert _fresh_600k_fits(app) is False
+    # the caller's reflex is a fresh preview, which would be a second order if the first
+    # attempt filled: it is told to look first
+    assert "list_orders" in str(refused.value)

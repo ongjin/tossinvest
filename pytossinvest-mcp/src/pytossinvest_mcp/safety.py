@@ -12,7 +12,7 @@ from typing import Callable
 
 from pytossinvest.money import to_decimal
 
-from .config import Settings
+from .config import IDEMPOTENCY_WINDOW_SEC, SEND_MARGIN_SEC, Settings
 from .stores import TokenStore, SpendStore
 
 _KST = ZoneInfo("Asia/Seoul")
@@ -328,6 +328,21 @@ class SafetyManager:
                 f"live order must wait {delay}s after preview before placing",
             )
         return spec
+
+    def send_within(self, token: str) -> float:
+        """Seconds left in which an order for this token may still be sent.
+
+        Every attempt of a token re-uses one clientOrderId, and the broker deduplicates that
+        id only for IDEMPOTENCY_WINDOW_SEC after it first sees it. A retry held up past that
+        (rate-limit backoff inside the SDK) would be taken as a new order. The time is counted
+        from the preview, which is never later than the first send, so every send stays
+        inside the window."""
+        rec = _guard_store(lambda: self.token_store.get(token))
+        if rec is None:
+            return 0.0
+        issued_at = rec[2]
+        deadline = issued_at + IDEMPOTENCY_WINDOW_SEC - SEND_MARGIN_SEC
+        return max(0.0, deadline - self._now())
 
     def commit(self, token: str) -> None:
         _guard_store(lambda: self.token_store.delete(token))

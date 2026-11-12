@@ -132,7 +132,7 @@ def get_order(app: AppContext, order_id: str) -> dict:
 
 from http import HTTPStatus  # noqa: E402
 
-from pytossinvest.errors import TossInvestError  # noqa: E402
+from pytossinvest.errors import SendDeadlineError, TossInvestError  # noqa: E402
 from pytossinvest.money import to_decimal  # noqa: E402
 from . import market_hours  # noqa: E402
 
@@ -163,6 +163,8 @@ def _is_rejection(app: AppContext, e: Exception, attempt: Attempt) -> bool:
         return False
     if app.use_paper:
         return not isinstance(e, _STORE_ERRORS)
+    if isinstance(e, SendDeadlineError):
+        return True  # the SDK stopped before sending; what it had sent before was refused
     if not isinstance(e, TossInvestError) or e.code in _UNSETTLED_CODES:
         return False
     # Only a 4xx is a refusal. The SDK also raises for a 200 it could not read, and a 200
@@ -207,6 +209,15 @@ def _settle_failure(app: AppContext, spec, e: Exception, attempt: Attempt, event
                           "clientOrderId": spec.client_order_id, "reservation": reservation})
     except _STORE_ERRORS:
         pass
+
+
+# What the model reads when an order was not sent because its send deadline had passed. Its
+# reflex is a fresh preview, which is a second order if an earlier attempt went through.
+_TOO_LATE_TO_SEND = (
+    "not sent: too late to send this order under its confirmation (the broker deduplicates a "
+    "re-sent order for 10 minutes only). An earlier attempt may have gone through: check "
+    "list_orders / list_conditional_orders before previewing again"
+)
 
 
 def _settle_success(app: AppContext, confirmation_token: str, result: dict, event: dict) -> dict:
@@ -324,7 +335,7 @@ def _place_order(app: AppContext, confirmation_token: str) -> dict:
     try:
         if spec.kind == CONDITIONAL_KIND:
             from .conditional import execute_place
-            result = execute_place(app, spec)
+            result = execute_place(app, spec, app.safety.send_within(confirmation_token))
         elif app.use_paper:
             if spec.price is not None:
                 fill_price = spec.price
@@ -352,10 +363,13 @@ def _place_order(app: AppContext, confirmation_token: str) -> dict:
                 quantity=spec.quantity, price=spec.price, order_amount=spec.order_amount,
                 time_in_force=spec.time_in_force, client_order_id=spec.client_order_id,
                 confirm_high_value_order=spec.confirm_high_value_order,
+                send_within=app.safety.send_within(confirmation_token),
             )
             result = {"orderId": resp.order_id, "clientOrderId": resp.client_order_id}
     except Exception as e:
         _settle_failure(app, spec, e, attempt, {"tool": "place_order"})
+        if isinstance(e, SendDeadlineError):
+            raise GuardrailError("send-deadline-exceeded", _TOO_LATE_TO_SEND) from e
         raise  # token NOT committed -> idempotent retry reuses same clientOrderId
 
     return _settle_success(app, confirmation_token, result, {
