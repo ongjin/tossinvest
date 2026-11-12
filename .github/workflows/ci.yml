@@ -23,7 +23,7 @@ jobs:
         with:
           enable-cache: true
       - name: SDK tests (pytossinvest)
-        run: uv run --package pytossinvest --extra dev pytest pytossinvest/tests
+        run: uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests
       - name: MCP tests (pytossinvest-mcp)
         run: uv run --package pytossinvest-mcp --extra dev pytest pytossinvest-mcp/tests
       - name: Both suites from the repo root (the README one-liner)

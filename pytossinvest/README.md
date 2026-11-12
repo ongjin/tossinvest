@@ -32,13 +32,13 @@
 ## 설치
 
 ```bash
-# PyPI
-pip install pytossinvest
-pip install "pytossinvest[ws]"   # 실시간 WebSocket 스트림까지
+# PyPI (배포 이름은 pytossinvest-sdk, import 이름은 pytossinvest)
+pip install pytossinvest-sdk
+pip install "pytossinvest-sdk[ws]"   # 실시간 WebSocket 스트림까지
 
 # 소스에서 (uv 워크스페이스 모노레포)
 git clone <repo> && cd toss
-uv sync --package pytossinvest --extra dev
+uv sync --package pytossinvest-sdk --extra dev
 ```
 
 요구사항: **Python 3.12+**. 의존성은 `httpx`(sync) + `pydantic` v2 뿐. 실시간 스트림(`pytossinvest.stream`)만 선택 의존성 `websockets`(`[ws]` extra).
@@ -185,7 +185,7 @@ get_conditional_order(conditional_order_id) -> dict
 
 > 조건주문 목록에는 앱 등 다른 채널에서 만든 조건주문도 섞여 나옵니다.
 
-**실시간 스트림** (`pip install "pytossinvest[ws]"`) — 구독은 선언형이라 `subscribe()` 한 번이 구독 전체를 바꿉니다(`[]` = 전체 해제). 60초마다 `PING` keepalive 를 알아서 보냅니다.
+**실시간 스트림** (`pip install "pytossinvest-sdk[ws]"`) — 구독은 선언형이라 `subscribe()` 한 번이 구독 전체를 바꿉니다(`[]` = 전체 해제). 60초마다 `PING` keepalive 를 알아서 보냅니다.
 
 ```python
 import asyncio
@@ -297,7 +297,7 @@ except BusinessRuleError as e:
 ## 테스트
 
 ```bash
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 148 passing
+uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # 148 passing
 ```
 
 `respx` 로 httpx 를 mock 합니다 — **라이브 키 불필요, 네트워크 0**. `git clone && uv sync && pytest` 면 그린.

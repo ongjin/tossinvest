@@ -10,14 +10,14 @@
 git clone https://github.com/ongjin/tossinvest && cd tossinvest
 
 # 패키지별 동기화 (dev extra 포함)
-uv sync --package pytossinvest --extra dev
+uv sync --package pytossinvest-sdk --extra dev
 uv sync --package pytossinvest-mcp --extra dev
 ```
 
 ## 테스트 (라이브 키 불필요, 네트워크 0)
 
 ```bash
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests        # SDK — respx mock
+uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests        # SDK — respx mock
 uv run --package pytossinvest-mcp --extra dev pytest pytossinvest-mcp/tests # MCP — FakeClient + paper
 ```
 

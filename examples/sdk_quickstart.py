@@ -5,11 +5,11 @@
   2) 실 API 사용 예시 — 환경변수에 키가 있을 때만 실행 (없으면 안전하게 스킵).
 
 실행:
-    uv run --package pytossinvest python examples/sdk_quickstart.py
+    uv run --package pytossinvest-sdk python examples/sdk_quickstart.py
 
 실 API 까지 보려면 키를 주고 실행:
     TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
-      uv run --package pytossinvest python examples/sdk_quickstart.py
+      uv run --package pytossinvest-sdk python examples/sdk_quickstart.py
 """
 
 from __future__ import annotations

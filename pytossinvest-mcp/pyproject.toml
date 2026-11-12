@@ -17,7 +17,7 @@ classifiers = [
     "Topic :: Office/Business :: Financial :: Investment",
 ]
 dependencies = [
-    "pytossinvest>=0.0.3",
+    "pytossinvest-sdk>=0.0.3",
     "mcp>=2.0.0,<3",
     "pydantic-settings>=2",
 ]
@@ -43,7 +43,7 @@ build-backend = "hatchling.build"
 packages = ["src/pytossinvest_mcp"]
 
 [tool.uv.sources]
-pytossinvest = { workspace = true }
+pytossinvest-sdk = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

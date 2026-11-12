@@ -1,6 +1,6 @@
 """Realtime WebSocket stream: trades, orderbooks and your own order events.
 
-Optional dependency: install the ``ws`` extra (``pip install "pytossinvest[ws]"``).
+Optional dependency: install the ``ws`` extra (``pip install "pytossinvest-sdk[ws]"``).
 """
 from __future__ import annotations
 

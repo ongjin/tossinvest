@@ -4,7 +4,7 @@
 
 | 파일 | 무엇을 보여주나 | 실행 |
 |---|---|---|
-| [`sdk_quickstart.py`](sdk_quickstart.py) | SDK 의 돈/Decimal 안전계약(float 거부)과 실 API 사용 모양 | `uv run --package pytossinvest python examples/sdk_quickstart.py` |
+| [`sdk_quickstart.py`](sdk_quickstart.py) | SDK 의 돈/Decimal 안전계약(float 거부)과 실 API 사용 모양 | `uv run --package pytossinvest-sdk python examples/sdk_quickstart.py` |
 | [`mcp_paper_demo.py`](mcp_paper_demo.py) | MCP 안전모델 전 과정 — 가드레일 차단 → preview→place paper 체결 → 멱등 → 감사로그 | `uv run --package pytossinvest-mcp python examples/mcp_paper_demo.py` |
 
 - **SDK 데모**는 시세/주문 호출 부분이 환경변수에 키가 있을 때만 실행됩니다(없으면 안전계약 데모만 돌고 스킵). 키를 주면 실 API 모양까지 보입니다.

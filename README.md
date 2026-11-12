@@ -23,7 +23,7 @@ decimal·레이트리밋·멱등성까지 제대로 다룬 **SDK** + LLM 에게 
 
 ## 한 줄로
 
-- **퀀트라면** → `pip install pytossinvest`, 파이썬에서 바로 잔고 조회·주문. *(SDK · MIT)*
+- **퀀트라면** → `pip install pytossinvest-sdk`(import 는 `pytossinvest`), 파이썬에서 바로 잔고 조회·주문. *(SDK · MIT)*
 - **AI 에 맡기려면** → MCP 클라이언트(Claude Desktop·Cursor)에 `pytossinvest-mcp` 를 꽂으면 *"내 잔고 보여줘 / 삼성전자 5주 사줘 / 환율 추세 분석해줘"* 가 바로 됩니다. *(MCP 서버 · Apache-2.0)*
 
 경계가 **SDK ↔ MCP** 로 깨끗하게 갈립니다. 퀀트는 SDK 만 쓰고, AI 유저는 그 위의 안전모델까지 받습니다.
@@ -141,7 +141,7 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 
 ```bash
 # 테스트 — 라이브 키 불필요
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # 148 passing
+uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # 148 passing
 uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # 306 passing
 uv run --all-packages --all-extras pytest                                 # 둘 다 한 번에 (루트)
 ```
