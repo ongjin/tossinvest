@@ -75,7 +75,10 @@ chmod 700 "$backup/rollback.sh"
 echo "[1/5] backup in $DEPLOY_DIR/$backup (was $old_ref)"
 
 # --- 2. build the new image under its own tag, from the incoming files ---
-docker build --quiet --tag "$new_ref" "$INCOMING/$BUILD_DIR" >/dev/null
+if ! build_log="$(docker build --quiet --tag "$new_ref" "$INCOMING/$BUILD_DIR" 2>&1)"; then
+    printf '%s\n' "$build_log" | tail -n 25 | indent >&2
+    die "the image did not build. Nothing that runs was touched; a package published minutes ago may not be on the index yet, so try again"
+fi
 echo "[2/5] built $new_ref"
 
 # --- 3. offline preflight: no network, dummy bearer, no brokerage credentials ---
