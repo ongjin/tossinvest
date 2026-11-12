@@ -1,0 +1,54 @@
+name: Release
+
+# Push a tag named <package>-v<version> to publish that package to PyPI:
+#   pytossinvest-v1.2.3   or   pytossinvest-mcp-v1.2.3
+# Upload uses PyPI Trusted Publishing (OIDC), so no API token is stored anywhere.
+# Procedure and the one-time PyPI setup: docs/wiki/release.md
+on:
+  push:
+    tags:
+      - "pytossinvest-v*"
+      - "pytossinvest-mcp-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write  # lets PyPI verify this run; the only credential involved
+    env:
+      UV_PYTHON: "3.12"
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+
+      - name: Read package and version from the tag
+        run: |
+          case "$TAG" in
+            pytossinvest-mcp-v*) package=pytossinvest-mcp ;;
+            pytossinvest-v*)     package=pytossinvest ;;
+            *) echo "unexpected tag: $TAG" >&2; exit 1 ;;
+          esac
+          version="${TAG#"$package"-v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([a-z0-9.]+)?$ ]]; then
+            echo "tag does not end in a version: $TAG" >&2; exit 1
+          fi
+          echo "PACKAGE=$package" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Tests
+        run: uv run --package "$PACKAGE" --extra dev pytest "$PACKAGE/tests"
+
+      - name: Build
+        run: uv build --package "$PACKAGE" --out-dir dist
+
+      - name: Tag must match the built version
+        run: ls "dist/${PACKAGE//-/_}-${VERSION}-py3-none-any.whl" "dist/${PACKAGE//-/_}-${VERSION}.tar.gz"
+
+      - name: Publish
+        run: uv publish --trusted-publishing always dist/*.whl dist/*.tar.gz
