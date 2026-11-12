@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from .audit import AuditLog
 from .config import Settings
 from .paper import PaperBroker, PaperOrder
-from .safety import CONDITIONAL_KIND, GuardrailError, SafetyManager, order_currency
+from .safety import CONDITIONAL_KIND, Attempt, GuardrailError, SafetyManager, order_currency
 
 _KST = ZoneInfo("Asia/Seoul")
 
@@ -134,26 +134,38 @@ from pytossinvest.money import to_decimal  # noqa: E402
 from . import market_hours  # noqa: E402
 
 
-# A 4xx a same-token retry can meet when the first, timed-out attempt did register: Toss may
-# check "one OCO/OTO per symbol" before echoing the idempotent result.
-_RETRY_ECHO_CODES = frozenset({"duplicate-conditional-order"})
+# 4xx codes that do not settle whether this clientOrderId executed:
+# - request-in-progress: the same clientOrderId is still being processed (an attempt that timed
+#   out here, typically) and may yet go through;
+# - duplicate-conditional-order: a same-token retry can meet this when the first, timed-out
+#   attempt did register, since Toss may check "one OCO/OTO per symbol" before echoing the
+#   idempotent result.
+_UNSETTLED_CODES = frozenset({"request-in-progress", "duplicate-conditional-order"})
 
 
-def _is_rejection(app: AppContext, e: Exception) -> bool:
+def _is_rejection(app: AppContext, e: Exception, attempt: Attempt) -> bool:
     """True when a failed place/modify certainly did not execute, so its reservation can go.
-    Paper fills are local and atomic. Live, only a Toss 4xx is certain: a timeout, dropped
-    connection or 5xx may have filled, so the reservation stays (a retry with the same token
-    reuses it via the clientOrderId dedup key, a fresh preview counts on top of it)."""
+    Paper fills are local and atomic. Live, only a Toss 4xx on a first attempt is certain: a
+    timeout, dropped connection or 5xx may have filled, so the reservation stays (a retry with
+    the same token reuses it via the clientOrderId dedup key, a fresh preview counts on top of
+    it). Once an attempt has ended that way, no later refusal releases the reservation: a 401
+    or 429 never reached order handling, and "already filled" on a re-sent modify does not
+    undo the first one. Only a retry that succeeds settles it."""
     if app.use_paper:
         return True
-    if not isinstance(e, TossInvestError) or e.code in _RETRY_ECHO_CODES:
+    if attempt is Attempt.RETRY:
         return False
-    return e.http_status is not None and e.http_status < HTTPStatus.INTERNAL_SERVER_ERROR
+    if not isinstance(e, TossInvestError) or e.code in _UNSETTLED_CODES:
+        return False
+    # Only a 4xx is a refusal. The SDK also raises for a 200 it could not read, and a 200
+    # means the broker took the order.
+    status = e.http_status
+    return status is not None and HTTPStatus.BAD_REQUEST <= status < HTTPStatus.INTERNAL_SERVER_ERROR
 
 
-def _settle_failure(app: AppContext, spec, e: Exception) -> str:
+def _settle_failure(app: AppContext, spec, e: Exception, attempt: Attempt) -> str:
     """Release the reservation only for a certain rejection; returns the audit label."""
-    if not _is_rejection(app, e):
+    if not _is_rejection(app, e, attempt):
         return "kept"
     app.safety.release(spec)
     return "released"
@@ -247,11 +259,17 @@ def preview_order(app: AppContext, *, symbol: str, side: str, order_type: str,
 
 
 def place_order(app: AppContext, *, confirmation_token: str) -> dict:
+    with app.safety.executing(confirmation_token):  # one call per token at a time
+        return _place_order(app, confirmation_token)
+
+
+def _place_order(app: AppContext, confirmation_token: str) -> dict:
     spec = app.safety.consume(confirmation_token)  # validates exists + not expired
     if spec.modify_order_id is not None:  # it reserves only a delta; placing with it dodges the cap
         raise GuardrailError("wrong-token", "this token is from a modify preview; use modify_order")
     # re-check non-daily guardrails (per-order/high-value/hard-ceiling/deny-allow); daily handled by reserve
     app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
+    attempt = app.safety.attempt(spec)
     if not app.safety.reserve(spec):
         raise GuardrailError("daily-limit", "this order would push today's total over the cap")
     try:
@@ -288,7 +306,7 @@ def place_order(app: AppContext, *, confirmation_token: str) -> dict:
             )
             result = {"orderId": resp.order_id, "clientOrderId": resp.client_order_id}
     except Exception as e:
-        reservation = _settle_failure(app, spec, e)
+        reservation = _settle_failure(app, spec, e, attempt)
         app.audit.record({
             "tool": "place_order", "mode": app.config.mode, "decision": "error",
             "error": str(e), "clientOrderId": spec.client_order_id, "reservation": reservation,
@@ -349,11 +367,17 @@ def preview_modify(app: AppContext, order_id: str, *, order_type: str,
 
 
 def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
+    with app.safety.executing(confirmation_token):  # one call per token at a time
+        return _modify_order(app, confirmation_token)
+
+
+def _modify_order(app: AppContext, confirmation_token: str) -> dict:
     spec = app.safety.consume(confirmation_token)  # validates exists + not expired
     if spec.modify_order_id is None:
         raise GuardrailError("wrong-token", "this token is from an order preview; use place_order")
     # re-check non-daily guardrails; daily handled by reserve (reserve uses signed delta via prev_notional)
     app.safety.check_guardrails(spec, is_market_open=True, enforce_hours=False, check_daily=False)
+    attempt = app.safety.attempt(spec)
     if not app.safety.reserve(spec):
         raise GuardrailError("daily-limit", "this modify would push today's total over the cap")
     try:
@@ -367,7 +391,7 @@ def modify_order(app: AppContext, *, confirmation_token: str) -> dict:
                 confirm_high_value_order=spec.confirm_high_value_order,
             )
     except Exception as e:
-        reservation = _settle_failure(app, spec, e)
+        reservation = _settle_failure(app, spec, e, attempt)
         app.audit.record({
             "tool": "modify_order", "mode": app.config.mode, "decision": "error",
             "error": str(e), "orderId": spec.modify_order_id,

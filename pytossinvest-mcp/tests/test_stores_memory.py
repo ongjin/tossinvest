@@ -69,3 +69,22 @@ def test_spend_negative_delta_floors_at_zero():
     assert s.current("d", "KRW") == Decimal("0")
     # the credit must not widen today's cap
     assert s.reserve("d", "KRW", Decimal("1200"), Decimal("1000"), "c1") is False
+
+
+def test_token_claim_is_exclusive_until_unclaimed():
+    s = MemoryTokenStore()
+    assert s.claim("t1") is True
+    assert s.claim("t1") is False  # someone is executing it
+    assert s.claim("t2") is True   # other tokens are unaffected
+    s.unclaim("t1")
+    assert s.claim("t1") is True
+
+
+def test_spend_reserved_reports_a_held_reservation():
+    s = MemorySpendStore()
+    assert s.reserved("d", "c1") is False
+    s.reserve("d", "KRW", Decimal("100"), Decimal("1000"), "c1")
+    assert s.reserved("d", "c1") is True
+    assert s.reserved("other-day", "c1") is False
+    s.release("d", "KRW", Decimal("100"), "c1")
+    assert s.reserved("d", "c1") is False

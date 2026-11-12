@@ -1,6 +1,6 @@
 [project]
 name = "pytossinvest-mcp"
-version = "0.0.1"
+version = "0.0.2"
 description = "MCP server giving an LLM safe read/trade access to a Toss Securities account (unofficial)"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -17,7 +17,7 @@ classifiers = [
     "Topic :: Office/Business :: Financial :: Investment",
 ]
 dependencies = [
-    "pytossinvest",
+    "pytossinvest>=0.0.3",
     "mcp>=2.0.0,<3",
     "pydantic-settings>=2",
 ]

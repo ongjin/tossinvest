@@ -49,13 +49,22 @@ def _spec_from_dict(d: dict) -> OrderSpec:
     )
 
 
+# Must outlive the longest possible attempt, or a second caller could execute the token while
+# the first is still in flight. The SDK bounds one call at five sends (three 429 retries and
+# one token re-issue), each with a gate wait, a token fetch and per-phase HTTP timeouts, plus
+# the backoffs: about 12 minutes with the defaults, twice that when the account lookup runs
+# first. The claim only outlives its call when an instance dies mid-attempt.
+CLAIM_TTL_SEC = 3600
+
+
 class RedisTokenStore:
     # Conditional tokens get their own key space: a pre-conditional build sharing this redis only
     # reads the ordinary prefix, and would otherwise run a conditional spec as a plain order.
     def __init__(self, client, *, prefix: str = "tok:", conditional_prefix: str = "ctok:",
-                 grace_sec: int = 86400):
+                 claim_prefix: str = "claim:", grace_sec: int = 86400):
         self._r = client
         self._prefixes = {ORDER_KIND: prefix, CONDITIONAL_KIND: conditional_prefix}
+        self._claim_prefix = claim_prefix
         self._grace = grace_sec  # physical TTL; code checks expires_at for logical expiry
 
     def _keys(self, token: str) -> list[str]:
@@ -78,6 +87,12 @@ class RedisTokenStore:
 
     def delete(self, token: str) -> None:
         self._r.delete(*self._keys(token))
+
+    def claim(self, token: str) -> bool:
+        return bool(self._r.set(f"{self._claim_prefix}{token}", "1", nx=True, ex=CLAIM_TTL_SEC))
+
+    def unclaim(self, token: str) -> None:
+        self._r.delete(f"{self._claim_prefix}{token}")
 
 
 class RedisSpendStore:
@@ -123,6 +138,9 @@ class RedisSpendStore:
             if new < Decimal("0"):
                 new = Decimal("0")
             self._r.set(self._spend_key(day, currency), str(new), ex=self._ttl)
+
+    def reserved(self, day: str, dedup_key: str) -> bool:
+        return bool(self._r.sismember(self._reserved_key(day), dedup_key))
 
     def current(self, day: str, currency: str) -> Decimal:
         return to_decimal(self._r.get(self._spend_key(day, currency)) or "0")

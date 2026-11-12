@@ -149,3 +149,32 @@ def test_paper_starting_cash_legacy_scalar_env(monkeypatch):
     monkeypatch.setenv("TOSSINVEST_PAPER_STARTING_CASH", "5000000")
     s = Settings(_env_file=None)
     assert s.paper_starting_cash == {"KRW": Decimal("5000000")}
+
+
+def test_account_seq_is_unset_by_default_and_parses_from_env_text():
+    assert _settings().account_seq is None
+    assert _settings(account_seq="42").account_seq == 42
+
+
+@pytest.mark.parametrize("account_seq", [None, 42])
+def test_account_seq_setting_reaches_the_sdk_client(monkeypatch, account_seq):
+    from pytossinvest_mcp.server import build_client
+    seen = {}
+
+    class Recorder:
+        def __init__(self, *args, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr("pytossinvest.TossInvestClient", Recorder)
+
+    build_client(_settings(account_seq=account_seq))
+
+    assert seen["account_seq"] == account_seq
+
+
+def test_confirmation_ttl_cannot_outlive_the_broker_idempotency_window():
+    # a same-token retry after the broker forgot the clientOrderId (10 minutes) would be
+    # a second order that the reservation dedup counts only once
+    assert _settings(confirmation_ttl_sec=600).confirmation_ttl_sec == 600
+    with pytest.raises(ValueError):
+        _settings(confirmation_ttl_sec=601)

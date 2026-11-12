@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
+from enum import Enum
 from zoneinfo import ZoneInfo
 from decimal import Decimal, InvalidOperation
 from typing import Callable
@@ -54,16 +56,30 @@ class GuardrailError(Exception):
         self.message = message
 
 
+def _store_errors() -> tuple:
+    """What a store call raises when the backend is unreachable. redis-py has its own
+    ConnectionError / TimeoutError that do not derive from the builtins; redis is an optional
+    extra, so its base class is added only when installed."""
+    errors = (ConnectionError, TimeoutError, OSError)
+    try:
+        from redis.exceptions import RedisError
+    except ImportError:
+        return errors
+    return errors + (RedisError,)
+
+
+_STORE_ERRORS = _store_errors()
+
+
 def _guard_store(fn):
     """Wrap a store I/O call: re-raise connection/timeout/OS errors as GuardrailError.
 
     Does NOT catch GuardrailError — guardrail rejections (invalid/expired tokens, daily
-    limit, etc.) must propagate unchanged.  redis-py's ConnectionError is a subclass of
-    the builtin, so no redis import is needed here.
+    limit, etc.) must propagate unchanged.
     """
     try:
         return fn()
-    except (ConnectionError, TimeoutError, OSError) as exc:
+    except _STORE_ERRORS as exc:
         raise GuardrailError(
             "state-unavailable",
             f"order state store is unavailable: {exc}",
@@ -72,6 +88,13 @@ def _guard_store(fn):
 
 ORDER_KIND = "order"
 CONDITIONAL_KIND = "conditional"
+
+
+class Attempt(Enum):
+    """Where a place/modify call stands for its confirmation token."""
+
+    FIRST = "first"  # nothing was sent for this token before, or what was sent was refused
+    RETRY = "retry"  # an earlier call ended without a known outcome and its reservation was kept
 
 
 @dataclass
@@ -173,14 +196,13 @@ class SafetyManager:
         return to_decimal(cfg.daily_order_limit_usd if currency == "USD" else cfg.daily_order_limit)
 
     def spend_delta(self, spec: OrderSpec) -> Decimal:
-        """What reserve / release move on today's counter. A conditional modify never refunds:
-        the order lives until expire_date and may have been counted on an earlier day."""
+        """What reserve / release move on today's counter. A modify counts only its increase.
+        Like a cancel, making an order smaller refunds nothing: the order may never have been
+        counted here (placed in the app, or a conditional order from an earlier day), and a
+        refund for it would free budget for new orders past the cap."""
         if spec.prev_notional is None:
             return spec.notional
-        delta = spec.notional - spec.prev_notional
-        if spec.kind == CONDITIONAL_KIND:
-            return max(Decimal("0"), delta)
-        return delta
+        return max(Decimal("0"), spec.notional - spec.prev_notional)
 
     def check_symbol(self, symbol: str) -> None:
         """Deny / allow lists. Also guards cancels: a conditional order may be a stop-loss."""
@@ -236,6 +258,13 @@ class SafetyManager:
                 "market is closed (set enforce_market_hours=false to override)",
             )
 
+    def attempt(self, spec: OrderSpec) -> Attempt:
+        """Read before reserve(): a reservation already held for this clientOrderId means an
+        earlier call may have executed."""
+        day = self._today().isoformat()
+        held = _guard_store(lambda: self.spend_store.reserved(day, spec.client_order_id))
+        return Attempt.RETRY if held else Attempt.FIRST
+
     def reserve(self, spec: OrderSpec) -> bool:
         day = self._today().isoformat()
         return _guard_store(lambda: self.spend_store.reserve(
@@ -256,6 +285,27 @@ class SafetyManager:
             token, spec, expires_at=now + self._cfg.confirmation_ttl_sec, issued_at=now,
         ))
         return token
+
+    @contextlib.contextmanager
+    def executing(self, token: str):
+        """Hold a confirmation token for the length of one place/modify call. Calls that share
+        a token share its reservation, so a second one arriving while the first is in flight
+        is refused: a refusal it got from the broker would release the reservation the first
+        still depends on."""
+        if not _guard_store(lambda: self.token_store.claim(token)):
+            raise GuardrailError(
+                "confirmation-in-progress",
+                "this confirmation_token is already being executed; wait for that call's result",
+            )
+        try:
+            yield
+        finally:
+            try:
+                self.token_store.unclaim(token)
+            except _STORE_ERRORS:
+                # The claim expires on its own. Raising here would turn an order that just
+                # went through into an error the caller then retries with a fresh preview.
+                pass
 
     def consume(self, token: str) -> OrderSpec:
         rec = _guard_store(lambda: self.token_store.get(token))

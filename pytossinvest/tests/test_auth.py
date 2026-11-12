@@ -101,3 +101,40 @@ def test_short_expiry_is_clamped_not_in_past():
     mgr.get_token()
     # without clamp: 1000 + 10 - 30 = 980 (< issue time). with clamp: 1000 + max(0,-20) = 1000.
     assert mgr._expires_at >= 1000.0
+
+
+@respx.mock
+def test_invalidate_keeps_a_token_newer_than_the_one_that_failed():
+    # a 401 on tok-1 arriving after another thread already re-issued must not drop tok-2
+    clock = FakeClock()
+    route = respx.post(f"{BASE}/oauth2/token").mock(
+        side_effect=[
+            httpx.Response(200, json={"access_token": "tok-1", "token_type": "Bearer", "expires_in": 3600}),
+            httpx.Response(200, json={"access_token": "tok-2", "token_type": "Bearer", "expires_in": 3600}),
+        ]
+    )
+    mgr, _ = _mgr(clock)
+    assert mgr.get_token() == "tok-1"
+    mgr.invalidate("tok-1")
+    assert mgr.get_token() == "tok-2"
+
+    mgr.invalidate("tok-1")  # stale
+
+    assert mgr.get_token() == "tok-2"
+    assert route.call_count == 2
+
+
+@respx.mock
+@pytest.mark.parametrize("response", [
+    httpx.Response(200, text="not json"),
+    httpx.Response(200, json={"token": "tok"}),               # no access_token
+    httpx.Response(200, json={"access_token": "tok"}),        # no expires_in
+    httpx.Response(200, json={"access_token": "tok", "expires_in": "soon"}),
+    httpx.Response(200, json=["tok"]),
+])
+def test_malformed_token_response_raises_oauth_error(response):
+    respx.post(f"{BASE}/oauth2/token").mock(return_value=response)
+    mgr, _ = _mgr(FakeClock())
+    with pytest.raises(OAuthError) as exc:
+        mgr.get_token()
+    assert exc.value.code == "invalid-response"
