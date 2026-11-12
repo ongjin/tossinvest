@@ -427,3 +427,136 @@ def test_clients_sharing_a_token_cache_issue_one_token():
     second._request("GET", "/api/v1/prices", group="MARKET_DATA")
 
     assert token_route.call_count == 1
+
+
+# --- send deadline: an idempotent retry must not be sent after the broker forgot its key ---
+
+ORDER = dict(symbol="005930", side="BUY", order_type="LIMIT", quantity="1", price="100",
+             client_order_id="abc")
+ORDER_OK = {"result": {"orderId": "1", "clientOrderId": "abc"}}
+
+
+def _order_client(clock, **kwargs):
+    c = _client_on(clock, **kwargs)
+    c._account_seq = 1
+    return c
+
+
+@respx.mock
+def test_order_sent_promptly_is_unaffected_by_its_send_deadline():
+    _token_route()
+    route = respx.post(f"{BASE}/api/v1/orders").mock(return_value=httpx.Response(200, json=ORDER_OK))
+    c = _order_client(_SteppingClock())
+
+    assert c.place_order(**ORDER, send_within=30.0).order_id == "1"
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_backoff_that_would_overrun_the_send_deadline_ends_the_call_without_resending():
+    from pytossinvest.errors import SendDeadlineError
+    _token_route()
+    route = respx.post(f"{BASE}/api/v1/orders").mock(side_effect=[
+        httpx.Response(429, json={"error": {}}, headers={"Retry-After": "30"}),
+        httpx.Response(200, json=ORDER_OK),
+    ])
+    clock = _SteppingClock()
+    c = _order_client(clock)
+
+    with pytest.raises(SendDeadlineError):
+        c.place_order(**ORDER, send_within=10.0)
+
+    assert route.call_count == 1   # the retry was never sent
+    assert clock.slept == []       # and no time was spent waiting for nothing
+
+
+@respx.mock
+def test_rate_gate_wait_that_would_overrun_the_send_deadline_sends_nothing():
+    from pytossinvest.errors import SendDeadlineError
+    _token_route()
+    respx.get(f"{BASE}/api/v1/orders").mock(return_value=httpx.Response(
+        200, json={"result": {}},
+        headers={"X-RateLimit-Limit": "6", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "60"},
+    ))
+    order_route = respx.post(f"{BASE}/api/v1/orders").mock(
+        return_value=httpx.Response(200, json=ORDER_OK))
+    clock = _SteppingClock()
+    c = _order_client(clock)
+    c._request("GET", "/api/v1/orders", group="ORDER", account=True)  # empties the ORDER bucket
+
+    with pytest.raises(SendDeadlineError):
+        c.place_order(**ORDER, send_within=5.0)
+
+    assert order_route.call_count == 0
+    assert clock.slept == []  # it does not sit out a 60s wait it already knows is too long
+
+
+@respx.mock
+def test_send_deadline_is_checked_again_right_before_the_request_goes_out():
+    # issuing the token is not a sleep the client controls, and it can be slow
+    from pytossinvest.errors import SendDeadlineError
+    clock = _SteppingClock()
+
+    def slow_issue(request):
+        clock.t += 100.0
+        return httpx.Response(200, json={"access_token": "tok", "expires_in": 3600})
+    respx.post(f"{BASE}/oauth2/token").mock(side_effect=slow_issue)
+    order_route = respx.post(f"{BASE}/api/v1/orders").mock(
+        return_value=httpx.Response(200, json=ORDER_OK))
+    c = _order_client(clock)
+
+    with pytest.raises(SendDeadlineError):
+        c.place_order(**ORDER, send_within=10.0)
+
+    assert order_route.call_count == 0
+
+
+@respx.mock
+def test_no_time_left_sends_nothing():
+    from pytossinvest.errors import SendDeadlineError
+    _token_route()
+    order_route = respx.post(f"{BASE}/api/v1/orders").mock(
+        return_value=httpx.Response(200, json=ORDER_OK))
+
+    with pytest.raises(SendDeadlineError):
+        _order_client(_SteppingClock()).place_order(**ORDER, send_within=0.0)
+
+    assert order_route.call_count == 0
+
+
+@respx.mock
+def test_conditional_order_honours_its_send_deadline():
+    from pytossinvest.errors import SendDeadlineError
+    _token_route()
+    route = respx.post(f"{BASE}/api/v1/conditional-orders").mock(side_effect=[
+        httpx.Response(429, json={"error": {}}, headers={"Retry-After": "30"}),
+        httpx.Response(200, json={"result": {"conditionalOrderId": "c1"}}),
+    ])
+    c = _order_client(_SteppingClock())
+
+    with pytest.raises(SendDeadlineError):
+        c.create_conditional_order(
+            symbol="005930", type="SINGLE", quantity="1", order_type="LIMIT",
+            expire_date="2026-12-31", first={"orderSide": "SELL", "triggerPrice": "1"},
+            client_order_id="abc", send_within=10.0)
+
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_send_deadline_is_one_deadline_for_the_whole_call_not_per_retry():
+    from pytossinvest.errors import SendDeadlineError
+    _token_route()
+    route = respx.post(f"{BASE}/api/v1/orders").mock(side_effect=[
+        httpx.Response(429, json={"error": {}}, headers={"Retry-After": "30"}),
+        httpx.Response(429, json={"error": {}}, headers={"Retry-After": "30"}),
+        httpx.Response(200, json=ORDER_OK),
+    ])
+    clock = _SteppingClock()
+    c = _order_client(clock)
+
+    with pytest.raises(SendDeadlineError):
+        c.place_order(**ORDER, send_within=50.0)
+
+    assert clock.slept == [30.0]   # the first backoff fits, the second would end at 60s
+    assert route.call_count == 2

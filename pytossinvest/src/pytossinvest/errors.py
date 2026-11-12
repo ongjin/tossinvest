@@ -11,6 +11,7 @@ __all__ = [
     "RateLimitError",
     "ServerError",
     "OAuthError",
+    "SendDeadlineError",
     "error_from_response",
     "oauth_error_from_response",
 ]
@@ -45,6 +46,12 @@ class BusinessRuleError(TossInvestError): ...
 class RateLimitError(TossInvestError): ...
 class ServerError(TossInvestError): ...
 class OAuthError(TossInvestError): ...
+
+
+class SendDeadlineError(TossInvestError):
+    """A call given send_within ran out of time before its request could go out, so nothing
+    more was sent. Anything the same call sent earlier was refused (429 or 401): those are
+    the only responses it retries."""
 
 
 _STATUS_MAP: dict[int, type[TossInvestError]] = {
