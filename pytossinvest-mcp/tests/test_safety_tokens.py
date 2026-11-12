@@ -188,3 +188,47 @@ def test_restore_spend_floors_negative_modify_deltas():
     m.restore_spend(events)
     day = date(2026, 6, 17).isoformat()
     assert m.spend_store.current(day, "KRW") == Decimal("0")  # floored, not negative
+
+
+def test_restore_spend_counts_reservations_that_never_settled():
+    # 'reserved' is logged before a call is sent. Unless a later event says the reservation
+    # was released, it still stands: the call may have executed (unknown outcome), or the
+    # process died before it could log anything else.
+    s = Settings(_env_file=None)
+    m = SafetyManager(
+        s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17),
+        token_store=MemoryTokenStore(), spend_store=MemorySpendStore(),
+    )
+    ts = "2026-06-17T01:00:00+00:00"
+    events = [
+        {"ts": ts, "decision": "reserved", "clientOrderId": "died-mid-call", "notional": "600000", "currency": "KRW"},
+        {"ts": ts, "decision": "reserved", "clientOrderId": "unknown-outcome", "notional": "100000", "currency": "KRW"},
+        {"ts": ts, "decision": "error", "clientOrderId": "unknown-outcome", "reservation": "kept"},
+        {"ts": ts, "decision": "reserved", "clientOrderId": "refused", "notional": "50000", "currency": "KRW"},
+        {"ts": ts, "decision": "error", "clientOrderId": "refused", "reservation": "released"},
+        {"ts": ts, "decision": "reserved", "clientOrderId": "went-through", "notional": "70000", "currency": "KRW"},
+        {"ts": ts, "decision": "placed", "clientOrderId": "went-through", "notional": "70000", "currency": "KRW"},
+    ]
+
+    m.restore_spend(events)
+
+    # 600,000 + 100,000 + 70,000 (counted once); the refused 50,000 is gone
+    assert m.spend_store.current(date(2026, 6, 17).isoformat(), "KRW") == Decimal("770000")
+
+
+def test_restore_spend_survives_a_damaged_client_order_id():
+    s = Settings(_env_file=None)
+    m = SafetyManager(
+        s, now=lambda: 1000.0, today=lambda: date(2026, 6, 17),
+        token_store=MemoryTokenStore(), spend_store=MemorySpendStore(),
+    )
+    ts = "2026-06-17T01:00:00+00:00"
+    events = [
+        {"ts": ts, "decision": "placed", "clientOrderId": {}, "notional": "100", "currency": "KRW"},
+        {"ts": ts, "decision": "error", "clientOrderId": ["x"], "reservation": "released"},
+        {"ts": ts, "decision": "placed", "clientOrderId": "ok", "notional": "200", "currency": "KRW"},
+    ]
+
+    m.restore_spend(events)  # must not raise: a damaged line never blocks boot
+
+    assert m.spend_store.current(date(2026, 6, 17).isoformat(), "KRW") == Decimal("300")

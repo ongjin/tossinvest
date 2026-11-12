@@ -156,3 +156,47 @@ def test_redis_py_errors_become_state_unavailable(error):
 
     with pytest.raises(GuardrailError, match="state-unavailable"):
         _guard_store(unreachable)
+
+
+def _interleave_once(monkeypatch, competing_call):
+    """Run competing_call between the next spend read and its write, as happens when the
+    reading instance stalls (its lock, if it relied on one, has expired by then)."""
+    import pytossinvest_mcp.redis_stores as redis_stores
+    parse = redis_stores.to_decimal
+    state = {"ran": False}
+
+    def read_then_compete(value):
+        if not state["ran"]:
+            state["ran"] = True
+            competing_call()
+        return parse(value)
+
+    monkeypatch.setattr(redis_stores, "to_decimal", read_then_compete)
+
+
+def test_reserve_does_not_lose_a_reservation_made_between_its_read_and_write(r, monkeypatch):
+    ours, theirs = RedisSpendStore(r), RedisSpendStore(r)
+
+    def competing_reserve():
+        r.delete("lock:spend:d")  # a lock held across the stall would have expired
+        assert theirs.reserve("d", "KRW", Decimal("600"), Decimal("1000"), "theirs") is True
+
+    _interleave_once(monkeypatch, competing_reserve)
+
+    assert ours.reserve("d", "KRW", Decimal("600"), Decimal("1000"), "ours") is False
+    assert ours.current("d", "KRW") == Decimal("600")
+
+
+def test_release_does_not_lose_a_reservation_made_between_its_read_and_write(r, monkeypatch):
+    ours, theirs = RedisSpendStore(r), RedisSpendStore(r)
+    ours.reserve("d", "KRW", Decimal("300"), Decimal("1000"), "ours")
+
+    def competing_reserve():
+        r.delete("lock:spend:d")
+        assert theirs.reserve("d", "KRW", Decimal("600"), Decimal("1000"), "theirs") is True
+
+    _interleave_once(monkeypatch, competing_reserve)
+
+    ours.release("d", "KRW", Decimal("300"), "ours")
+
+    assert ours.current("d", "KRW") == Decimal("600")  # theirs stands, ours is gone

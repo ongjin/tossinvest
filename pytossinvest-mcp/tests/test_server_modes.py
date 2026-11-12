@@ -97,6 +97,8 @@ def test_redis_down_fails_closed(tmp_path, monkeypatch):
             raise ConnectionError("redis down")
         def lock(self, *a, **k):
             raise ConnectionError("redis down")
+        def transaction(self, *a, **k):  # the spend store reserves in a WATCH/MULTI transaction
+            raise ConnectionError("redis down")
 
     monkeypatch.setattr(srv, "_redis_from_url",
                         lambda url: _BrokenRedis(decode_responses=True))

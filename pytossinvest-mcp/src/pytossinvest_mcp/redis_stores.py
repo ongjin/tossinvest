@@ -50,9 +50,9 @@ def _spec_from_dict(d: dict) -> OrderSpec:
 
 
 # Must outlive the longest possible attempt, or a second caller could execute the token while
-# the first is still in flight. The SDK bounds one call at five sends (three 429 retries and
-# one token re-issue), each with a gate wait, a token fetch and per-phase HTTP timeouts, plus
-# the backoffs: about 12 minutes with the defaults, twice that when the account lookup runs
+# the first is still in flight. The SDK bounds one call at six sends (three 429 retries and
+# two token re-issues), each with a gate wait, a token fetch and per-phase HTTP timeouts, plus
+# the backoffs: about 14 minutes with the defaults, twice that when the account lookup runs
 # first. The claim only outlives its call when an instance dies mid-attempt.
 CLAIM_TTL_SEC = 3600
 
@@ -96,9 +96,14 @@ class RedisTokenStore:
 
 
 class RedisSpendStore:
-    def __init__(self, client, *, lock_timeout: float = 5.0, ttl_sec: int = 172800):
+    """Daily spend counters as Decimal strings. reserve and release are optimistic
+    transactions (WATCH / MULTI): the amount is computed here in Decimal, and the write only
+    lands if nothing touched the keys since they were read, else the whole step is retried.
+    A lock with a TTL cannot give that guarantee: a holder that stalls past the TTL writes
+    over whatever another instance reserved in the meantime."""
+
+    def __init__(self, client, *, ttl_sec: int = 172800):
         self._r = client
-        self._lock_timeout = lock_timeout
         self._ttl = ttl_sec  # 2-day GC backstop; keys roll by day
 
     def _spend_key(self, day: str, currency: str) -> str:
@@ -107,37 +112,38 @@ class RedisSpendStore:
     def _reserved_key(self, day: str) -> str:
         return f"reserved:{day}"
 
-    def _lock(self, day: str):
-        return self._r.lock(
-            f"lock:spend:{day}",
-            timeout=self._lock_timeout,
-            blocking_timeout=self._lock_timeout,
-        )
-
     def reserve(self, day: str, currency: str, delta: Decimal, cap: Decimal, dedup_key: str) -> bool:
-        with self._lock(day):
-            if self._r.sismember(self._reserved_key(day), dedup_key):
+        spend_key, reserved_key = self._spend_key(day, currency), self._reserved_key(day)
+
+        def step(pipe) -> bool:
+            if pipe.sismember(reserved_key, dedup_key):
                 return True
-            cur = to_decimal(self._r.get(self._spend_key(day, currency)) or "0")
+            cur = to_decimal(pipe.get(spend_key) or "0")
             if cur + delta > cap:
                 return False
             # floored: a downsize of an order never counted here must not bank credit under the cap
             new = max(Decimal("0"), cur + delta)
-            self._r.set(self._spend_key(day, currency), str(new), ex=self._ttl)
-            self._r.sadd(self._reserved_key(day), dedup_key)
-            self._r.expire(self._reserved_key(day), self._ttl)
+            pipe.multi()
+            pipe.set(spend_key, str(new), ex=self._ttl)
+            pipe.sadd(reserved_key, dedup_key)
+            pipe.expire(reserved_key, self._ttl)
             return True
 
+        return self._r.transaction(step, spend_key, reserved_key, value_from_callable=True)
+
     def release(self, day: str, currency: str, delta: Decimal, dedup_key: str) -> None:
-        with self._lock(day):
-            if not self._r.sismember(self._reserved_key(day), dedup_key):
+        spend_key, reserved_key = self._spend_key(day, currency), self._reserved_key(day)
+
+        def step(pipe) -> None:
+            if not pipe.sismember(reserved_key, dedup_key):
                 return
-            self._r.srem(self._reserved_key(day), dedup_key)
-            cur = to_decimal(self._r.get(self._spend_key(day, currency)) or "0")
-            new = cur - delta
-            if new < Decimal("0"):
-                new = Decimal("0")
-            self._r.set(self._spend_key(day, currency), str(new), ex=self._ttl)
+            cur = to_decimal(pipe.get(spend_key) or "0")
+            new = max(Decimal("0"), cur - delta)
+            pipe.multi()
+            pipe.srem(reserved_key, dedup_key)
+            pipe.set(spend_key, str(new), ex=self._ttl)
+
+        self._r.transaction(step, spend_key, reserved_key)
 
     def reserved(self, day: str, dedup_key: str) -> bool:
         return bool(self._r.sismember(self._reserved_key(day), dedup_key))

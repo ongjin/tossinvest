@@ -333,10 +333,26 @@ class SafetyManager:
         _guard_store(lambda: self.token_store.delete(token))
 
     def restore_spend(self, events: list[dict]) -> None:
-        """Rebuild today's per-currency spend from prior 'placed'/'modified' audit events (UTC ts -> KST date)."""
+        """Rebuild today's per-currency spend from the audit log (UTC ts -> KST date).
+
+        Every reservation still standing counts: one logged before its call ('reserved') and
+        not given back since ('error' with reservation 'released'), plus what was 'placed' or
+        'modified'. A call whose outcome is unknown, or that died before logging one, has only
+        its 'reserved' line and so stays counted. Events for one clientOrderId count once."""
         today = self._today().isoformat()
-        for ev in events:
-            if not isinstance(ev, dict) or ev.get("decision") not in ("placed", "modified"):
+        standing: dict[object, tuple[str, Decimal]] = {}
+        for index, ev in enumerate(events):
+            if not isinstance(ev, dict):
+                continue
+            decision = ev.get("decision")
+            order_key = ev.get("clientOrderId")
+            if not isinstance(order_key, str):
+                # logs from before clientOrderId was recorded, or a damaged line: on its own
+                order_key = ("event", index)
+            if decision == "error" and ev.get("reservation") == "released":
+                standing.pop(order_key, None)
+                continue
+            if decision not in ("reserved", "placed", "modified"):
                 continue
             notional = ev.get("notional")
             ts = ev.get("ts")
@@ -349,4 +365,7 @@ class SafetyManager:
                 continue
             if ev_date != today:
                 continue
-            self.spend_store.seed(today, ev.get("currency", "KRW"), amount)
+            standing[order_key] = (ev.get("currency", "KRW"), amount)
+
+        for currency, amount in standing.values():
+            self.spend_store.seed(today, currency, amount)
