@@ -4,10 +4,10 @@
 
 # pytossinvest (SDK) 내부구조
 
-토스증권 Open API 의 Python 클라이언트. **MIT**. `pytossinvest-mcp` 가 이걸 의존하므로 **공개 API 를 깨면 MCP 가 깨진다** — 시그니처/반환타입 변경 시 MCP 테스트도 그린 확인.
+토스증권 Open API 의 Python 클라이언트. **MIT**. PyPI 배포 이름은 **`pytossinvest-sdk`**(`pip install pytossinvest-sdk`), import 와 디렉터리 이름은 `pytossinvest` 다. uv 명령의 `--package` 에는 배포 이름을 쓴다. `pytossinvest-mcp` 가 이걸 의존하므로 **공개 API 를 깨면 MCP 가 깨진다** — 시그니처/반환타입 변경 시 MCP 테스트도 그린 확인.
 
 - 위치: `pytossinvest/src/pytossinvest/`
-- 테스트: `uv run --package pytossinvest --extra dev pytest pytossinvest/tests` (respx httpx mock + 로컬 websockets 서버, **라이브 키 불필요**)
+- 테스트: `uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests` (respx httpx mock + 로컬 websockets 서버, **라이브 키 불필요**)
 - 의존: `httpx`(sync), `pydantic` v2. 버전은 `pytossinvest/pyproject.toml` 과 `__init__.__version__`(둘을 같이 올린다. `tests/test_smoke.py` 가 값을 확인한다).
 
 ## 레이어 (의존 방향: 위 → 아래)

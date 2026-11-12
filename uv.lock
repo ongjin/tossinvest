@@ -10,8 +10,8 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "pytossinvest",
     "pytossinvest-mcp",
+    "pytossinvest-sdk",
 ]
 
 [[package]]
@@ -602,7 +602,43 @@ wheels = [
 ]
 
 [[package]]
-name = "pytossinvest"
+name = "pytossinvest-mcp"
+version = "0.0.2"
+source = { editable = "pytossinvest-mcp" }
+dependencies = [
+    { name = "mcp" },
+    { name = "pydantic-settings" },
+    { name = "pytossinvest-sdk" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "fakeredis", extra = ["lua"] },
+    { name = "pytest" },
+]
+http = [
+    { name = "uvicorn" },
+]
+redis = [
+    { name = "cryptography" },
+    { name = "redis" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cryptography", marker = "extra == 'redis'", specifier = ">=42" },
+    { name = "fakeredis", extras = ["lua"], marker = "extra == 'dev'", specifier = ">=2" },
+    { name = "mcp", specifier = ">=2.0.0,<3" },
+    { name = "pydantic-settings", specifier = ">=2" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "pytossinvest-sdk", editable = "pytossinvest" },
+    { name = "redis", marker = "extra == 'redis'", specifier = ">=5" },
+    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.30" },
+]
+provides-extras = ["dev", "redis", "http"]
+
+[[package]]
+name = "pytossinvest-sdk"
 version = "0.0.3"
 source = { editable = "pytossinvest" }
 dependencies = [
@@ -630,42 +666,6 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'ws'", specifier = ">=14" },
 ]
 provides-extras = ["ws", "dev"]
-
-[[package]]
-name = "pytossinvest-mcp"
-version = "0.0.2"
-source = { editable = "pytossinvest-mcp" }
-dependencies = [
-    { name = "mcp" },
-    { name = "pydantic-settings" },
-    { name = "pytossinvest" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "fakeredis", extra = ["lua"] },
-    { name = "pytest" },
-]
-http = [
-    { name = "uvicorn" },
-]
-redis = [
-    { name = "cryptography" },
-    { name = "redis" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "cryptography", marker = "extra == 'redis'", specifier = ">=42" },
-    { name = "fakeredis", extras = ["lua"], marker = "extra == 'dev'", specifier = ">=2" },
-    { name = "mcp", specifier = ">=2.0.0,<3" },
-    { name = "pydantic-settings", specifier = ">=2" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
-    { name = "pytossinvest", editable = "pytossinvest" },
-    { name = "redis", marker = "extra == 'redis'", specifier = ">=5" },
-    { name = "uvicorn", marker = "extra == 'http'", specifier = ">=0.30" },
-]
-provides-extras = ["dev", "redis", "http"]
 
 [[package]]
 name = "pywin32"

@@ -1,13 +1,13 @@
 name: Release
 
 # Push a tag named <package>-v<version> to publish that package to PyPI:
-#   pytossinvest-v1.2.3   or   pytossinvest-mcp-v1.2.3
+#   pytossinvest-sdk-v1.2.3   or   pytossinvest-mcp-v1.2.3
 # Upload uses PyPI Trusted Publishing (OIDC), so no API token is stored anywhere.
 # Procedure and the one-time PyPI setup: docs/wiki/release.md
 on:
   push:
     tags:
-      - "pytossinvest-v*"
+      - "pytossinvest-sdk-v*"
       - "pytossinvest-mcp-v*"
 
 permissions:
@@ -16,7 +16,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: pypi
+    # One GitHub environment per package: PyPI refuses two pending publishers that share a
+    # repository, workflow and environment.
+    environment: ${{ startsWith(github.ref_name, 'pytossinvest-mcp-v') && 'pypi-mcp' || 'pypi' }}
     permissions:
       contents: read
       id-token: write  # lets PyPI verify this run; the only credential involved
@@ -29,9 +31,10 @@ jobs:
 
       - name: Read package and version from the tag
         run: |
+          # package = the name on PyPI, directory = where it lives in this repo
           case "$TAG" in
-            pytossinvest-mcp-v*) package=pytossinvest-mcp ;;
-            pytossinvest-v*)     package=pytossinvest ;;
+            pytossinvest-sdk-v*) package=pytossinvest-sdk; directory=pytossinvest ;;
+            pytossinvest-mcp-v*) package=pytossinvest-mcp; directory=pytossinvest-mcp ;;
             *) echo "unexpected tag: $TAG" >&2; exit 1 ;;
           esac
           version="${TAG#"$package"-v}"
@@ -39,10 +42,11 @@ jobs:
             echo "tag does not end in a version: $TAG" >&2; exit 1
           fi
           echo "PACKAGE=$package" >> "$GITHUB_ENV"
+          echo "DIRECTORY=$directory" >> "$GITHUB_ENV"
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Tests
-        run: uv run --package "$PACKAGE" --extra dev pytest "$PACKAGE/tests"
+        run: uv run --package "$PACKAGE" --extra dev pytest "$DIRECTORY/tests"
 
       - name: Build
         run: uv build --package "$PACKAGE" --out-dir dist

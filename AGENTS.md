@@ -18,7 +18,7 @@
 ## Tech Stack
 
 - **Runtime**: Python 3.12, **uv 워크스페이스** 모노레포 (hatchling build)
-- **`pytossinvest`** (SDK, **MIT**): `httpx`(sync) + `pydantic` v2. 토큰매니저·그룹별 레이트리미터·decimal-safe money·code 기반 에러·32 엔드포인트(API 1.2.19 REST 전부 — 조건주문 5·수급 5·랭킹·시장지표 3·전종목 포함) + 실시간 스트림 `pytossinvest.stream`(선택 의존성 `websockets`, `[ws]` extra).
+- **`pytossinvest`** (SDK, **MIT**, PyPI 배포 이름 `pytossinvest-sdk` — `--package` 에도 이 이름): `httpx`(sync) + `pydantic` v2. 토큰매니저·그룹별 레이트리미터·decimal-safe money·code 기반 에러·32 엔드포인트(API 1.2.19 REST 전부 — 조건주문 5·수급 5·랭킹·시장지표 3·전종목 포함) + 실시간 스트림 `pytossinvest.stream`(선택 의존성 `websockets`, `[ws]` extra).
 - **`pytossinvest-mcp`** (MCP 서버, **Apache-2.0**, SDK 의존): `mcp>=2.0.0,<3`(lock 2.2.0, SDK v2 `MCPServer` — 2026-07-28 스펙, stdio) + `pydantic-settings`. 안전모델(모드·가드레일·preview/confirm·멱등성·감사로그) + 24 툴(조건주문 5·시장데이터 4 포함).
 - **테스트**: `pytest`. SDK 는 `respx` 로 httpx mock, MCP 는 `FakeClient` + paper 엔진 — **라이브 키 불필요, 네트워크 0**.
 
@@ -44,7 +44,7 @@ toss/
 uv sync --package pytossinvest-mcp --extra dev
 
 # 테스트
-uv run --package pytossinvest --extra dev pytest pytossinvest/tests   # SDK (148) — respx mock + 로컬 websockets 서버
+uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # SDK (148) — respx mock + 로컬 websockets 서버
 uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (306) — FakeClient
 uv run --all-packages --all-extras pytest                                 # 두 스위트를 루트에서 한 번에
 
@@ -71,7 +71,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 - **MCP 테스트 import** — 테스트에서 `conftest` 의 `FakeClient` 는 `from conftest import FakeClient`(pytest 가 tests/ 를 sys.path 에 넣음). `from tests.conftest` 는 `tests` 패키지가 없어 깨진다.
 - **통화 판정**(M1·C1 후속 반영): preview(`preview_order`/`preview_modify`)가 `get_prices([symbol])` 한 번으로 **권위 통화**(`Price.currency`)를 얻어 `build_spec(currency=…)` 로 주입; 조회 실패/빈결과/공백통화는 `order_currency(symbol)`(숫자로 시작=KRW — KR 코드는 영숫자 `0101N0` 도 있음 — 그 외=USD) **폴백**. 폴백은 한도가 작은 USD 쪽으로 떨어지게 짰다 — 예전 `isalpha()` 폴백은 `BRK.B` 를 KRW 로 봐 주문당 $1,000 대신 1,000,000 을 한도로 쓰는 구멍이었다(2026-09-30 수정). notional 단위는 주문통화, FX 환산 없음. KRW/USD 버킷 분리 유지. 이 권위 통화는 **장시간 게이트 국가 판정**(`_market_gate`→`_country_for_order`: USD→US·KRW→KR, 없으면 같은 `order_currency` 폴백)에도 재사용 — 가드레일 통화와 미/한국장 판정이 한 소스.
 - **modify 델타 회계(M1)** — `preview_modify` 가 원본 주문 명목(`get_order` 의 price×qty)을 `spec.prev_notional` 로 잡고, 일일 버킷에는 **증가분만**(`max(0, new−old)`) 검사·가산한다. per-order/고액/하드실링은 여전히 전액. **줄이는 정정은 환급 없음**(2026-11-12 전엔 음수 델타를 credit 으로 반영해, 앱에서 낸 주문을 줄이면 MCP 누계가 내려가 한도 100만에 150만이 나갔다. 0-하한으로는 막히지 않는다). 스토어의 0-하한은 그대로 남아 있지만 `SafetyManager` 는 더 이상 음수 델타를 넘기지 않는다.
-- **_spent 부팅 복원(memory 백엔드)** — 서버 시작 시 `audit.read_events()`→`safety.restore_spend` 가 당일(UTC ts→KST 날짜) 감사 이벤트로 누계를 되살린다. 아직 서 있는 예약을 모두 센다: 보내기 전에 쓴 `reserved` 와 `placed`·`modified` 를 `clientOrderId` 당 한 번, `reservation: released` 로 끝난 것은 제외. 그래서 체결 불명으로 끝났거나 호출 도중 프로세스가 죽은 주문도 재시작 뒤 한도에 남는다. 감사 파일을 지우면 당일 누적도 리셋된다. 손상된 줄은 건너뛴다.
+- **_spent 부팅 복원(memory 백엔드)** — 서버 시작 시 `audit.read_events()`→`safety.restore_spend` 가 당일(UTC ts→KST 날짜) 감사 이벤트로 누계를 되살린다. 아직 서 있는 예약을 모두 센다: 보내기 전에 쓴 `reserved` 와 `placed`·`modified` 를 `clientOrderId` 당 한 번, `reservation: released` 로 끝난 것은 제외. 그래서 체결 불명으로 끝났거나 호출 도중 프로세스가 죽은 주문도 재시작 뒤 한도에 남는다. 감사 파일을 지우면 당일 누적도 리셋된다. redis 백엔드는 counter 가 진실의 원천(AOF)이라 복원이 no-op 이다.
 - **mcp SDK ≥2.1 은 도구 예외 텍스트를 숨긴다** — `ToolError` 가 아닌 예외는 모델에 `Error executing tool <name>` 만 간다. 그래서 `server.py` 는 `@mcp.tool` 대신 **`@mcp_tool`**(`_model_facing_tool`)로 등록해 `GuardrailError`·`PaperError`·`TossInvestError`·`ValueError`·`httpx.HTTPError`(타임아웃 — 체결 불명 실패 뒤 같은 토큰 재시도 판단용) 를 `ToolError` 로 바꿔 올린다. 새 툴도 `@mcp_tool` 로 — 안 그러면 한도 거부 사유가 모델에 안 보인다.
 - **툴은 워커 스레드에서 병렬로 돈다**: mcp SDK 가 sync 툴을 `anyio.to_thread` 로 실행해서, 병렬 툴콜이면 `app.client`·스토어·paper 를 동시에 쓴다. SDK 는 토큰 발급을 락으로 한 번에 묶고(토스는 client 당 유효 토큰 1개라 동시 발급은 서로를 revoke), MCP 는 memory 스토어 락과 `executing(token)` 으로 막는다. 가변 상태를 더하면 락을 같이 건다. 상세: `docs/wiki/pytossinvest-sdk.md` '스레드 공유', `docs/wiki/pytossinvest-mcp.md` '모듈별 함정'.
 - **SDK 경로 값은 `_path_seg()` 로**: 주문 id·심볼처럼 URL 경로에 넣는 값은 LLM 이 채운다. 그대로 넣으면 `../holdings` 같은 값이 다른 엔드포인트로 풀린다. 상세: `docs/wiki/pytossinvest-sdk.md` '경로에 들어가는 값'.
@@ -82,7 +82,6 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 - **`_guard_store` fail-closed** — store I/O 중 `ConnectionError`/`Timeout`/`OSError` 와 redis-py 의 `RedisError`(내장 예외를 상속하지 않는다)는 `GuardrailError("state-unavailable")`로 변환(fail-closed). `GuardrailError` 자체는 절대 삼키지 않는다.
 - **redis 일일 카운터는 Decimal 문자열 + `WATCH/MULTI` 트랜잭션** — 금액은 Python Decimal 로 계산하고, 읽은 뒤 키가 바뀌었으면 통째로 재시도한다. TTL 락은 쓰지 않는다(락을 쥔 쪽이 TTL 보다 오래 멈추면 다른 인스턴스의 예약을 덮어쓴다). `INCR`/`INCRBYFLOAT` 금지(돈/수량 float 규칙 동일 적용).
 - **`fakeredis[lua]` 필수** — redis-py `Lock.release()`는 내부적으로 EVALSHA(Lua)를 사용. fakeredis 의 lua 서브패키지가 없으면 Lock.release()에서 `ResponseError` 발생. 실제 Redis 에는 Lua가 기본 내장.
-- **redis 백엔드에서 `restore_spend`/`seed` 는 no-op** — redis counter 가 진실의 원천(AOF). memory 백엔드만 부팅 시 감사 리플레이로 복원. redis 백엔드에서 감사 파일을 지워도 counter는 유지된다.
 - **PaperStore 심 — memory|redis + 통화별 현금 버킷** — `PaperBroker` 는 `PaperStore`(`lock()/load()/save()`)로 상태를 읽고 쓴다. 현금·실현손익은 통화별 버킷(FX 환산 없음), `place()` 는 `clientOrderId` 멱등. 상세: `docs/wiki/pytossinvest-mcp.md` 'PaperStore 심'.
 - **http 트랜스포트 함정** — `TOSSINVEST_TRANSPORT=http` 로 부팅 시 `TOSSINVEST_AUTH_TOKEN` 미설정이면 config validator 가 `ValueError`로 거부(live/redis 이중게이트와 동형 삼중 fail-closed). bearer 는 `hmac.compare_digest` 상수시간 비교(타이밍 공격 방지) — **bytes 로 비교**(str 비교는 비ASCII 헤더에서 `TypeError` → 500). MCP 엔드포인트는 `/mcp`(Streamable HTTP, `stateless_http=True` — **SDK v2 는 이걸 생성자가 아니라 `streamable_http_app()` 인자로 받는다**, `server.transport_kwargs(settings)` 가 단일 seam). uvicorn 은 옵션 `[http]` extra — `serve_http` 안에서만 import(stdio 설치·테스트 스위트는 uvicorn 불필요). 단일테넌트 — 토큰은 엔드포인트 인증일 뿐, Redis 미저장·Toss 자격증명 아님. **DNS-rebinding**: `transport_kwargs` 는 http 일 때 SDK 의 localhost-only 자동보호(비-localhost `Host`→421)를 끈다(bearer 가 인증면, 배포 host 는 프록시 제어) — 단 `TOSSINVEST_HTTP_ALLOWED_HOSTS`(JSON 리스트, 기본 빈값)를 주면 그 목록으로 Host 핀닝 재활성(심화방어, 미허용 Host→421). stdio 는 인자 미전달로 무변경.
 

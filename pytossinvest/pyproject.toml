@@ -1,5 +1,5 @@
 [project]
-name = "pytossinvest"
+name = "pytossinvest-sdk"
 version = "0.0.3"
 description = "Unofficial Python client for the Toss Securities Open API"
 readme = "README.md"
