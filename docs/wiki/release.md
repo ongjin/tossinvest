@@ -40,6 +40,8 @@
    git push origin <배포 이름>-v<버전>
    ```
 
+7. 서버에 올린다. `deploy/pypi/requirements.in` 의 버전을 방금 낸 버전으로 바꾸고 [deploy.md](deploy.md) 의 '새 버전 배포'를 따른다. 잠금 파일은 패키지가 PyPI 에 올라간 뒤에만 만들 수 있다(해시가 필요하다).
+
 ## 검증
 
 - GitHub Actions 의 Release 실행이 성공으로 끝난다.
