@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12"]
+        python-version: ["3.12", "3.14"]
     env:
       UV_PYTHON: ${{ matrix.python-version }}
     steps:
@@ -26,3 +26,5 @@ jobs:
         run: uv run --package pytossinvest --extra dev pytest pytossinvest/tests
       - name: MCP tests (pytossinvest-mcp)
         run: uv run --package pytossinvest-mcp --extra dev pytest pytossinvest-mcp/tests
+      - name: Both suites from the repo root (the README one-liner)
+        run: uv run --all-packages --all-extras pytest
