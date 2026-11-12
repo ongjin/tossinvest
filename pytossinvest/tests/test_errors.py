@@ -70,3 +70,34 @@ def test_oauth_error_separate_format():
     assert isinstance(err, OAuthError)
     assert err.code == "invalid_client"
     assert err.message == "bad secret"
+
+
+import pytest
+
+
+@pytest.mark.parametrize("body", [
+    {"error": "Internal Server Error", "status": 502},  # gateway-style: error is a string
+    "Bad Gateway",
+    ["Bad Gateway"],
+    7,
+])
+def test_non_standard_error_body_still_maps_by_status(body):
+    err = error_from_response(502, body)
+    assert isinstance(err, ServerError)
+    assert err.code == "unknown"
+    assert err.http_status == 502
+
+
+@pytest.mark.parametrize("body", ["Bad Gateway", ["Bad Gateway"], 7])
+def test_non_standard_oauth_error_body_still_raises_oauth_error(body):
+    err = oauth_error_from_response(502, body)
+    assert isinstance(err, OAuthError)
+    assert err.code == "unknown"
+    assert err.http_status == 502
+
+
+@pytest.mark.parametrize("code", [{"code": "bad-gateway"}, ["x"], 7, None])
+def test_non_string_error_code_becomes_unknown(code):
+    # callers test `err.code in {...}`: an unhashable code would raise instead of answering
+    assert error_from_response(400, {"error": {"code": code}}).code == "unknown"
+    assert oauth_error_from_response(502, {"error": code}).code == "unknown"

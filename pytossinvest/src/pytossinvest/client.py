@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import math
 import random
+import threading
 import time as _time
 from datetime import datetime
 from typing import Any, Callable
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -21,7 +24,6 @@ _KST = ZoneInfo("Asia/Seoul")
 # source of truth) and suppress peak-halving for that group. 429s are auto-retried
 # (bounded); RateLimitError surfaces only once retries are exhausted.
 _GROUP_RATES: dict[str, float] = {
-    "AUTH": 5,
     "ACCOUNT": 1,
     "ASSET": 5,
     "STOCK": 5,
@@ -44,9 +46,29 @@ _GROUP_RATES: dict[str, float] = {
 # per client, so another process issuing a token for the same client kills ours.
 _REISSUE_TOKEN_CODES = frozenset({"expired-token", "token-revoked"})
 
+# httpx drops an idle connection after 5s. Calls driven by an LLM or a person arrive further
+# apart than that, so each one paid a new TCP+TLS handshake. The two pool caps restate httpx's
+# client defaults: a bare httpx.Limits() would lift them to "unlimited".
+_HTTP_LIMITS = httpx.Limits(
+    max_connections=100, max_keepalive_connections=20, keepalive_expiry=60.0
+)
+
+# Values that percent-encoding cannot keep inside one path segment: "." and ".." navigate
+# the path and "" removes the segment.
+_UNSAFE_PATH_VALUES = frozenset({"", ".", ".."})
+
 
 def _drop_none(params: dict) -> dict:
     return {k: v for k, v in params.items() if v is not None}
+
+
+def _path_seg(value: str) -> str:
+    """A caller-supplied id or symbol as exactly one URL path segment. "/", "?", "#" and the
+    like are percent-encoded so the value cannot reach another endpoint."""
+    text = str(value)
+    if text in _UNSAFE_PATH_VALUES:
+        raise ValueError(f"invalid path value: {text!r}")
+    return quote(text, safe="")
 
 
 class TossInvestClient:
@@ -63,8 +85,11 @@ class TossInvestClient:
         max_retries: int = 3,
         retry_max_wait: float = 60.0,
         rng: Callable[[], float] = random.random,
+        account_seq: int | None = None,
     ):
-        self._http = httpx.Client(base_url=base_url, timeout=timeout)
+        """account_seq picks the account that account-scoped calls use; left unset, the first
+        account from get_accounts() is used. One client may be shared between threads."""
+        self._http = httpx.Client(base_url=base_url, timeout=timeout, limits=_HTTP_LIMITS)
         self._token = TokenManager(client_id, client_secret, http=self._http, now=monotonic)
         self._sleep = sleep
         self._now_kst = now_kst
@@ -75,8 +100,10 @@ class TossInvestClient:
             g: TokenBucket(capacity=r, refill_per_sec=r, now=monotonic)
             for g, r in _GROUP_RATES.items()
         }
-        self._account_seq: int | None = None
+        self._account_seq: int | None = account_seq
+        self._account_lock = threading.Lock()
         self._rate_from_header: dict[str, bool] = {}
+        self._rate_lock = threading.Lock()  # guards the buckets and _rate_from_header
 
     def close(self) -> None:
         self._http.close()
@@ -91,19 +118,25 @@ class TossInvestClient:
         bucket = self._buckets.get(group)
         if bucket is None:
             return
-        # Once the server's X-RateLimit-* headers have been seen for this group, they are
-        # the source of truth (they already reflect the 09:00-09:10 peak halving), so don't
-        # re-apply the static effective_rate. Until then, use the documented default.
-        if not self._rate_from_header.get(group):
-            rate = effective_rate(group, _GROUP_RATES[group], self._now_kst())
-            bucket.capacity = rate
-            bucket.refill_per_sec = rate
-        while not bucket.try_acquire():
-            self._sleep(bucket.time_until_available())
+        while True:
+            with self._rate_lock:
+                # Once the server's X-RateLimit-* headers have been seen for this group, they
+                # are the source of truth (they already reflect the 09:00-09:10 peak halving),
+                # so don't re-apply the static effective_rate. Until then, use the documented
+                # default.
+                if not self._rate_from_header.get(group):
+                    rate = effective_rate(group, _GROUP_RATES[group], self._now_kst())
+                    bucket.capacity = rate
+                    bucket.refill_per_sec = rate
+                if bucket.try_acquire():
+                    return
+                wait = bucket.time_until_available()
+
+            self._sleep(wait)  # outside the lock: other threads keep moving
 
     def _sync_bucket_from_headers(self, group: str, headers) -> None:
         """Reconcile a group's bucket to the server's X-RateLimit-* headers (source of truth).
-        No-op if any header is absent or unparseable."""
+        No-op if any header is absent, unparseable or nonsensical."""
         bucket = self._buckets.get(group)
         if bucket is None:
             return
@@ -118,11 +151,23 @@ class TossInvestClient:
             reset_f = float(reset)
         except (TypeError, ValueError):
             return
-        bucket.capacity = limit_f
-        if reset_f > 0:
-            bucket.refill_per_sec = 1.0 / reset_f
-        bucket._tokens = min(bucket._tokens, remaining_f)
-        self._rate_from_header[group] = True
+        # A bucket that can never hand out a token (capacity below one request, NaN, a zero
+        # refill rate) would park every caller in the gate for good.
+        if not all(map(math.isfinite, (limit_f, remaining_f, reset_f))):
+            return
+        if limit_f < 1 or remaining_f < 0 or reset_f < 0:
+            return
+
+        # Never wait in the gate longer than a 429 retry would: past retry_max_wait the request
+        # is sent anyway and the bounded 429 path takes over.
+        refill_period = min(reset_f, self._retry_max_wait)
+
+        with self._rate_lock:
+            bucket.capacity = limit_f
+            if refill_period > 0:
+                bucket.refill_per_sec = 1.0 / refill_period
+            bucket._tokens = min(bucket._tokens, remaining_f)
+            self._rate_from_header[group] = True
 
     def _request(
         self,
@@ -133,22 +178,22 @@ class TossInvestClient:
         account: bool = False,
         params: dict | None = None,
         json: dict | None = None,
-        data: dict | None = None,
         _retried: bool = False,
         _attempt: int = 0,
     ) -> Any:
         if account and self._account_seq is None:
-            self.get_accounts()  # caches the first account's accountSeq
+            with self._account_lock:  # threads arriving together share one lookup
+                if self._account_seq is None:
+                    self.get_accounts()  # caches the first account's accountSeq
             if self._account_seq is None:
                 raise RuntimeError("account context required but the API returned no account")
         self._gate(group)
-        headers = {"Authorization": f"Bearer {self._token.get_token()}"}
+        token = self._token.get_token()
+        headers = {"Authorization": f"Bearer {token}"}
         if account:
             headers["X-Tossinvest-Account"] = str(self._account_seq)
 
-        resp = self._http.request(
-            method, path, params=params, json=json, data=data, headers=headers
-        )
+        resp = self._http.request(method, path, params=params, json=json, headers=headers)
         self._sync_bucket_from_headers(group, resp.headers)
 
         if resp.status_code == 200:
@@ -159,7 +204,7 @@ class TossInvestClient:
                     "invalid-response", "200 response body was not valid JSON",
                     http_status=200,
                 )
-            if "result" not in body:
+            if not isinstance(body, dict) or "result" not in body:
                 raise TossInvestError(
                     "missing-result", "200 response had no 'result' field",
                     http_status=200,
@@ -173,15 +218,13 @@ class TossInvestClient:
             body = resp.json()
         except ValueError:
             body = {}
-        if (
-            resp.status_code == 401
-            and not _retried
-            and (body.get("error") or {}).get("code") in _REISSUE_TOKEN_CODES
-        ):
-            self._token.invalidate()
+        error = error_from_response(resp.status_code, body, resp.headers)
+
+        if resp.status_code == 401 and not _retried and error.code in _REISSUE_TOKEN_CODES:
+            self._token.invalidate(token)  # a no-op if another thread already re-issued
             return self._request(
                 method, path, group=group, account=account,
-                params=params, json=json, data=data, _retried=True, _attempt=_attempt,
+                params=params, json=json, _retried=True, _attempt=_attempt,
             )
 
         if resp.status_code == 429 and _attempt < self._max_retries:
@@ -196,10 +239,10 @@ class TossInvestClient:
                                      cap=self._retry_max_wait, rng=self._rng))
             return self._request(
                 method, path, group=group, account=account,
-                params=params, json=json, data=data, _retried=_retried, _attempt=_attempt + 1,
+                params=params, json=json, _retried=_retried, _attempt=_attempt + 1,
             )
 
-        raise error_from_response(resp.status_code, body, resp.headers)
+        raise error
 
     def access_token(self) -> str:
         """A current OAuth access token (cached, refreshed when near expiry), e.g. for the
@@ -250,7 +293,7 @@ class TossInvestClient:
 
     def get_market_calendar(self, country: str, date: str | None = None) -> dict:
         params = {"date": date} if date else None
-        return self._request("GET", f"/api/v1/market-calendar/{country}", group="MARKET_INFO", params=params)
+        return self._request("GET", f"/api/v1/market-calendar/{_path_seg(country)}", group="MARKET_INFO", params=params)
 
     def get_all_stocks(self, market: str, *, status: str | None = None,
                        security_type: str | None = None, common_share: bool | None = None) -> list:
@@ -262,7 +305,7 @@ class TossInvestClient:
     # --- KR trading trends (newest first; page with until=nextUntil) ---
     def _trading_trend(self, kind: str, symbol: str, count: int, until: str | None) -> dict:
         params = _drop_none({"count": count, "until": until})
-        return self._request("GET", f"/api/v1/stocks/{symbol}/{kind}", group="STOCK_TRADING_TREND",
+        return self._request("GET", f"/api/v1/stocks/{_path_seg(symbol)}/{kind}", group="STOCK_TRADING_TREND",
                              params=params)
 
     def get_investor_trading(self, symbol: str, count: int = 10, until: str | None = None) -> dict:
@@ -294,14 +337,14 @@ class TossInvestClient:
     def get_indicator_candles(self, symbol: str, interval: str, count: int = 100,
                               before: str | None = None) -> dict:
         params = _drop_none({"interval": interval, "count": count, "before": before})
-        return self._request("GET", f"/api/v1/market-indicators/{symbol}/candles",
+        return self._request("GET", f"/api/v1/market-indicators/{_path_seg(symbol)}/candles",
                              group="MARKET_INDICATOR_CHART", params=params)
 
     def get_index_investor_trading(self, symbol: str, interval: str, count: int = 10,
                                    until: str | None = None) -> dict:
         """Trading value by investor type for KOSPI or KOSDAQ."""
         params = _drop_none({"interval": interval, "count": count, "until": until})
-        return self._request("GET", f"/api/v1/market-indicators/{symbol}/investor-trading",
+        return self._request("GET", f"/api/v1/market-indicators/{_path_seg(symbol)}/investor-trading",
                              group="MARKET_INDICATOR", params=params)
 
     # --- order info ---
@@ -328,7 +371,7 @@ class TossInvestClient:
         return self._request("GET", "/api/v1/orders", group="ORDER_HISTORY", account=True, params=params)
 
     def get_order(self, order_id: str) -> dict:
-        return self._request("GET", f"/api/v1/orders/{order_id}", group="ORDER_HISTORY", account=True)
+        return self._request("GET", f"/api/v1/orders/{_path_seg(order_id)}", group="ORDER_HISTORY", account=True)
 
     # --- order write ---
     def place_order(self, *, symbol: str, side: str, order_type: str,
@@ -357,10 +400,10 @@ class TossInvestClient:
             payload["price"] = price
         if quantity is not None:
             payload["quantity"] = quantity
-        return self._request("POST", f"/api/v1/orders/{order_id}/modify", group="ORDER", account=True, json=payload)
+        return self._request("POST", f"/api/v1/orders/{_path_seg(order_id)}/modify", group="ORDER", account=True, json=payload)
 
     def cancel_order(self, order_id: str) -> dict:
-        return self._request("POST", f"/api/v1/orders/{order_id}/cancel", group="ORDER", account=True, json={})
+        return self._request("POST", f"/api/v1/orders/{_path_seg(order_id)}/cancel", group="ORDER", account=True, json={})
 
     # --- conditional orders ---
     # first/second use the wire shape {"orderSide", "triggerPrice", "orderPrice"?} with string prices.
@@ -394,11 +437,11 @@ class TossInvestClient:
         """Replace the whole order. The API cancels and re-creates it: the returned id is new."""
         payload = self._conditional_payload(type, quantity, order_type, expire_date, first, second,
                                             confirm_high_value_order)
-        return self._request("POST", f"/api/v1/conditional-orders/{conditional_order_id}/modify",
+        return self._request("POST", f"/api/v1/conditional-orders/{_path_seg(conditional_order_id)}/modify",
                              group="CONDITIONAL_ORDER", account=True, json=payload)
 
     def cancel_conditional_order(self, conditional_order_id: str) -> None:
-        self._request("DELETE", f"/api/v1/conditional-orders/{conditional_order_id}",
+        self._request("DELETE", f"/api/v1/conditional-orders/{_path_seg(conditional_order_id)}",
                       group="CONDITIONAL_ORDER", account=True)
 
     def list_conditional_orders(self, status: str = "OPEN", symbol: str | None = None,
@@ -413,5 +456,5 @@ class TossInvestClient:
                              account=True, params=params)
 
     def get_conditional_order(self, conditional_order_id: str) -> dict:
-        return self._request("GET", f"/api/v1/conditional-orders/{conditional_order_id}",
+        return self._request("GET", f"/api/v1/conditional-orders/{_path_seg(conditional_order_id)}",
                              group="CONDITIONAL_ORDER_HISTORY", account=True)

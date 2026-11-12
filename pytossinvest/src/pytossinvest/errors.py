@@ -58,12 +58,21 @@ _STATUS_MAP: dict[int, type[TossInvestError]] = {
 }
 
 
+def _code(value) -> str:
+    """Callers branch on `code in {...}`, so it is always a string."""
+    return value if isinstance(value, str) else "unknown"
+
+
 def error_from_response(
     http_status: int, body: dict | None, headers: dict | None = None
 ) -> TossInvestError:
     headers = headers or {}
-    err = (body or {}).get("error") or {}
-    code = err.get("code", "unknown")
+    # A gateway in front of the API may answer with another shape (a JSON string or list, or
+    # "error" as a plain string): keep the status-based class and report code "unknown".
+    err = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(err, dict):
+        err = {}
+    code = _code(err.get("code"))
     message = err.get("message", "")
     request_id = err.get("requestId")
     data = err.get("data")
@@ -92,9 +101,10 @@ def error_from_response(
 
 
 def oauth_error_from_response(http_status: int, body: dict | None) -> OAuthError:
-    body = body or {}
+    if not isinstance(body, dict):
+        body = {}
     return OAuthError(
-        body.get("error", "unknown"),
+        _code(body.get("error")),
         body.get("error_description", ""),
         http_status=http_status,
     )

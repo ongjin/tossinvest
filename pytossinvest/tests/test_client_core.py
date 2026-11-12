@@ -286,3 +286,94 @@ def test_header_rate_overrides_peak_halving():
     c._request("POST", "/api/v1/orders", group="ORDER", account=True, json={})
     c._gate("ORDER")                         # header seen -> must NOT re-halve 6 to 3
     assert c._buckets["ORDER"].capacity == 6.0
+
+
+@respx.mock
+def test_401_with_non_standard_body_raises_auth_error():
+    from pytossinvest.errors import AuthError
+    _token_route()
+    route = respx.get(f"{BASE}/api/v1/prices").mock(
+        return_value=httpx.Response(401, json={"error": "Unauthorized"}))  # edge/gateway shape
+    c = _client()
+    with pytest.raises(AuthError) as exc:
+        c._request("GET", "/api/v1/prices", group="MARKET_DATA")
+    assert exc.value.code == "unknown"
+    assert route.call_count == 1  # not a token problem we recognise, so no re-issue
+
+
+@respx.mock
+@pytest.mark.parametrize("content", [b"null", b"7", b'"result"', b'["result"]'])
+def test_200_non_object_body_raises_missing_result(content):
+    from pytossinvest.errors import TossInvestError
+    _token_route()
+    respx.get(f"{BASE}/api/v1/prices").mock(return_value=httpx.Response(200, content=content))
+    c = _client()
+    with pytest.raises(TossInvestError) as exc:
+        c._request("GET", "/api/v1/prices", group="MARKET_DATA")
+    assert exc.value.code == "missing-result"
+
+
+class _SteppingClock:
+    """monotonic + sleep pair: sleeping advances time, and a runaway gate loop is cut short."""
+
+    MAX_SLEEPS = 50
+
+    def __init__(self):
+        self.t = 1000.0
+        self.slept = []
+
+    def now(self):
+        return self.t
+
+    def sleep(self, seconds):
+        self.slept.append(seconds)
+        assert len(self.slept) <= self.MAX_SLEEPS, "rate gate never opened"
+        self.t += seconds
+
+
+def _client_on(clock, **kwargs):
+    return TossInvestClient("cid", "secret", base_url=BASE, sleep=clock.sleep,
+                            monotonic=clock.now, **kwargs)
+
+
+@respx.mock
+@pytest.mark.parametrize("limit, remaining, reset", [
+    ("0", "0", "1"),      # capacity 0: a token could never be acquired
+    ("nan", "5", "1"),
+    ("10", "0", "inf"),   # refill rate 0
+    ("-3", "0", "1"),
+])
+def test_nonsense_ratelimit_headers_are_ignored(limit, remaining, reset):
+    _token_route()
+    respx.get(f"{BASE}/api/v1/prices").mock(return_value=httpx.Response(
+        200, json={"result": []},
+        headers={"X-RateLimit-Limit": limit, "X-RateLimit-Remaining": remaining,
+                 "X-RateLimit-Reset": reset},
+    ))
+    clock = _SteppingClock()
+    c = _client_on(clock)
+    c._request("GET", "/api/v1/prices", group="MARKET_DATA")
+
+    c._gate("MARKET_DATA")  # must return: the documented default (10/s) still applies
+
+    assert c._buckets["MARKET_DATA"].capacity == 10
+    assert clock.slept == []
+
+
+@respx.mock
+def test_gate_wait_is_bounded_by_retry_max_wait():
+    # a server-reported refill period far beyond retry_max_wait must not park the caller:
+    # past the cap we send anyway and let the bounded 429 retry path decide
+    _token_route()
+    respx.get(f"{BASE}/api/v1/prices").mock(return_value=httpx.Response(
+        200, json={"result": []},
+        headers={"X-RateLimit-Limit": "10", "X-RateLimit-Remaining": "0",
+                 "X-RateLimit-Reset": "3600"},
+    ))
+    clock = _SteppingClock()
+    c = _client_on(clock, retry_max_wait=60.0)
+    c._request("GET", "/api/v1/prices", group="MARKET_DATA")
+
+    c._gate("MARKET_DATA")
+
+    assert 0 < sum(clock.slept) <= 60.0
