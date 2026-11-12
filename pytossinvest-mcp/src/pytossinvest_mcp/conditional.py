@@ -196,12 +196,14 @@ def get_conditional_order(app, conditional_order_id: str) -> dict:
     return app.client.get_conditional_order(conditional_order_id)
 
 
-def execute_place(app, spec) -> dict:
-    """The place_order execution step for a conditional token."""
+def execute_place(app, spec, send_within: float) -> dict:
+    """The place_order execution step for a conditional token. send_within: see
+    SafetyManager.send_within (the clientOrderId is deduplicated for a limited time)."""
     _require_live(app)  # a token issued live must not reach the broker from a paper instance
     return app.client.create_conditional_order(
         symbol=spec.symbol, client_order_id=spec.client_order_id,
-        confirm_high_value_order=spec.confirm_high_value_order, **spec.conditional,
+        confirm_high_value_order=spec.confirm_high_value_order, send_within=send_within,
+        **spec.conditional,
     )
 
 

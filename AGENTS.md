@@ -5,7 +5,7 @@
 - **돈/수량 float 금지** — 전구간 **문자열/Decimal**. SDK 의 `pytossinvest.money.to_decimal` 이 float 를 `TypeError` 로 거부(강제). MCP 레이어도 입출력 모두 문자열 유지(JSON/Decimal 안전).
 - **SDK 공개 API 깨지 말 것** — `pytossinvest-mcp` 가 `pytossinvest` 에 의존. SDK 시그니처/반환 타입 변경 시 **MCP 테스트도 그린 확인** 후 진행.
 - **`place_order` 안전 불변식 (프로젝트 핵심)** — 체결 경로(`paper.place` / `client.place_order`)는 **반드시 `safety.check_guardrails` 를 거친다**. confirmation 토큰은 `preview_order` 에서만, 가드레일 통과 후 발급. 이 불변식을 우회하는 변경 금지.
-  - **place 순서**: `executing(token)`(토큰당 실행은 한 번에 하나. 겹친 호출은 `confirmation-in-progress` 로 거부) 안에서 `consume(token)` → `check_guardrails(check_daily=False)` → **`reserve`(원자적·`clientOrderId` 멱등성)** → 감사로그에 `reserved` 선기록(재시작 복원용. 못 쓰면 보내지 않는다) → 실행 → **성공 시 `commit`(일일 누적 확정) / 실패 시 `release`(예약 해제, 토큰은 유지)** → 실패 시 동일 `clientOrderId` 로 멱등 재시도(유지된 예약은 dedup 키로 재사용돼 두 번 세지 않음).
+  - **place 순서**: `executing(token)`(토큰당 실행은 한 번에 하나. 겹친 호출은 `confirmation-in-progress` 로 거부) 안에서 `consume(token)` → `check_guardrails(check_daily=False)` → **`reserve`(원자적·`clientOrderId` 멱등성)** → 감사로그에 `reserved` 선기록(재시작 복원용. 못 쓰면 보내지 않는다) → 실행 → **성공 시 `commit`(일일 누적 확정) / 실패 시 `release`(예약 해제, 토큰은 유지)** → 실패 시 동일 `clientOrderId` 로 멱등 재시도(유지된 예약은 dedup 키로 재사용돼 두 번 세지 않음). 전송은 preview 후 570초 안에만 한다(`send_within`): 토스의 멱등 창 10분을 넘긴 재전송은 새 주문이 된다.
   - **release 는 첫 시도의, 체결이 확실히 안 된 실패만**: paper 의 실패(paper 스토어 I/O 오류는 제외. redis 에는 체결이 저장됐을 수 있다), 그리고 live 의 토스 4xx(`409 request-in-progress` 는 제외. 같은 `clientOrderId` 가 아직 처리 중이라는 뜻이라 체결될 수 있다). 타임아웃·연결끊김·5xx 처럼 체결 여부를 모르면 예약을 유지한다. **그렇게 유지된 예약은 이후 재시도가 어떤 이유로 거부돼도 풀지 않는다**(401·429 는 주문 처리까지 가지 못한 응답이고, 정정 재시도의 "이미 체결"은 첫 정정을 되돌리지 않는다). 성공한 재시도만 예약을 정리한다. 브로커 호출이 성공한 뒤의 `commit`·감사 기록 실패는 예외가 아니라 `warning` 이 붙은 결과로 돌려준다(오류로 보이면 호출자가 새 preview 로 같은 주문을 또 낸다).
   - **modify 도 동형 2단계**(`preview_modify`→`modify_order(confirmation_token)`): `executing(token)` 안에서 consume → 가드레일 재검사(**델타 회계** — `check_daily=True, prev_notional=원본명목`) → **`reserve(delta)`** → 실행 → 성공 시 **`commit`** / 실패 시 place 와 같은 규칙으로 `release(delta)`(토큰 유지). **델타는 증가분만**(`spend_delta` = `max(0, new−old)`): 줄이는 정정은 취소와 마찬가지로 한도를 환급하지 않는다. 환급하면 MCP 가 센 적 없는 주문(앱에서 낸 주문)을 줄여 한도를 다시 쓰는 우회가 생긴다.
   - **조건주문도 같은 경로**: `preview_conditional_order`/`preview_conditional_modify` 가 `kind="conditional"` 토큰을 발급하고 실행은 기존 `place_order`/`modify_order` 가 **예약 이후 실행 단계에서만** `kind` 로 분기(`conditional.execute_place/execute_modify`) — 조건주문 전용 체결 경로를 따로 만들지 말 것.
@@ -44,8 +44,8 @@ toss/
 uv sync --package pytossinvest-mcp --extra dev
 
 # 테스트
-uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # SDK (148) — respx mock + 로컬 websockets 서버
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (306) — FakeClient
+uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # SDK (155) — respx mock + 로컬 websockets 서버
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (310) — FakeClient
 uv run --all-packages --all-extras pytest                                 # 두 스위트를 루트에서 한 번에
 
 # MCP 서버 실행 (stdio — Claude Desktop/Cursor 등 MCP 클라이언트용)
@@ -73,7 +73,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 - **modify 델타 회계(M1)** — `preview_modify` 가 원본 주문 명목(`get_order` 의 price×qty)을 `spec.prev_notional` 로 잡고, 일일 버킷에는 **증가분만**(`max(0, new−old)`) 검사·가산한다. per-order/고액/하드실링은 여전히 전액. **줄이는 정정은 환급 없음**(2026-11-12 전엔 음수 델타를 credit 으로 반영해, 앱에서 낸 주문을 줄이면 MCP 누계가 내려가 한도 100만에 150만이 나갔다. 0-하한으로는 막히지 않는다). 스토어의 0-하한은 그대로 남아 있지만 `SafetyManager` 는 더 이상 음수 델타를 넘기지 않는다.
 - **_spent 부팅 복원(memory 백엔드)** — 서버 시작 시 `audit.read_events()`→`safety.restore_spend` 가 당일(UTC ts→KST 날짜) 감사 이벤트로 누계를 되살린다. 아직 서 있는 예약을 모두 센다: 보내기 전에 쓴 `reserved` 와 `placed`·`modified` 를 `clientOrderId` 당 한 번, `reservation: released` 로 끝난 것은 제외. 그래서 체결 불명으로 끝났거나 호출 도중 프로세스가 죽은 주문도 재시작 뒤 한도에 남는다. 감사 파일을 지우면 당일 누적도 리셋된다. redis 백엔드는 counter 가 진실의 원천(AOF)이라 복원이 no-op 이다.
 - **mcp SDK ≥2.1 은 도구 예외 텍스트를 숨긴다** — `ToolError` 가 아닌 예외는 모델에 `Error executing tool <name>` 만 간다. 그래서 `server.py` 는 `@mcp.tool` 대신 **`@mcp_tool`**(`_model_facing_tool`)로 등록해 `GuardrailError`·`PaperError`·`TossInvestError`·`ValueError`·`httpx.HTTPError`(타임아웃 — 체결 불명 실패 뒤 같은 토큰 재시도 판단용) 를 `ToolError` 로 바꿔 올린다. 새 툴도 `@mcp_tool` 로 — 안 그러면 한도 거부 사유가 모델에 안 보인다.
-- **툴은 워커 스레드에서 병렬로 돈다**: mcp SDK 가 sync 툴을 `anyio.to_thread` 로 실행해서, 병렬 툴콜이면 `app.client`·스토어·paper 를 동시에 쓴다. SDK 는 토큰 발급을 락으로 한 번에 묶고(토스는 client 당 유효 토큰 1개라 동시 발급은 서로를 revoke), MCP 는 memory 스토어 락과 `executing(token)` 으로 막는다. 가변 상태를 더하면 락을 같이 건다. 상세: `docs/wiki/pytossinvest-sdk.md` '스레드 공유', `docs/wiki/pytossinvest-mcp.md` '모듈별 함정'.
+- **툴은 워커 스레드에서 병렬로 돈다**: mcp SDK 가 sync 툴을 `anyio.to_thread` 로 실행해서, 병렬 툴콜이면 `app.client`·스토어·paper 를 동시에 쓴다. 가변 상태를 더하면 락을 같이 건다. 상세: `docs/wiki/pytossinvest-sdk.md` '스레드 공유', `docs/wiki/pytossinvest-mcp.md` '모듈별 함정'.
 - **SDK 경로 값은 `_path_seg()` 로**: 주문 id·심볼처럼 URL 경로에 넣는 값은 LLM 이 채운다. 그대로 넣으면 `../holdings` 같은 값이 다른 엔드포인트로 풀린다. 상세: `docs/wiki/pytossinvest-sdk.md` '경로에 들어가는 값'.
 - **주문 파라미터는 스키마 enum** — `server.py` 의 `Side`·`OrderType`·`TimeInForce`(`DAY|CLS|OPG`)·`OrderStatus`(`OPEN|CLOSED`)·`Currency` `Literal` 별칭. 이 모듈은 `from __future__ import annotations` 라 **별칭을 따옴표로 한 번 더 감싸면 안 된다**(`"Currency | None"` 는 이중 문자열이 돼 SDK 가 pydantic 모델을 못 만든다).
 - **확인 토큰 만료는 벽시계(`time.time`)** — 토큰이 redis 에 저장되므로 `time.monotonic` 을 쓰면 호스트(OrbStack VM 포함) 재시작·다중 호스트에서 만료 판정이 틀어진다(2026-09-30 수정).

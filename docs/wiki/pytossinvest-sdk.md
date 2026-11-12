@@ -23,7 +23,7 @@ money.py      문자열 ↔ Decimal, **float 거부** (pure, 모든 돈 변환�
 
 ## 공개 API (`from pytossinvest import ...`)
 
-`__init__.py` 가 export: `TossInvestClient`, 에러 9종(`TossInvestError`·`AuthError`·`ForbiddenError`·`NotFoundError`·`ValidationError`·`ConflictError`·`BusinessRuleError`·`RateLimitError`·`ServerError`·`OAuthError`), 모델 `Account`·`Price`·`BuyingPower`·`OrderResponse`, `to_decimal`·`decimal_to_str`.
+`__init__.py` 가 export: `TossInvestClient`, 에러(`TossInvestError`·`AuthError`·`ForbiddenError`·`NotFoundError`·`ValidationError`·`ConflictError`·`BusinessRuleError`·`RateLimitError`·`ServerError`·`OAuthError`·`SendDeadlineError`), 모델 `Account`·`Price`·`BuyingPower`·`OrderResponse`, `to_decimal`·`decimal_to_str`.
 - ⚠ `HoldingsItem` 와 `Money` 타입은 `models.__all__` 엔 있지만 **`__init__` 엔 미노출** — 필요하면 `from pytossinvest.models import Money, HoldingsItem`.
 
 ### `TossInvestClient`
@@ -42,8 +42,8 @@ HTTP 연결은 `_HTTP_LIMITS` 로 유휴 60초까지 재사용한다. httpx 기�
 **메서드** (전부 `_request` 경유):
 - 시세(계좌헤더 X): `get_prices(symbols)→Price[]`·`get_orderbook(symbol)`·`get_trades(symbol, count=50)`·`get_candles(symbol, interval, count=100, before=None)`·`get_stocks(symbols)`·`get_exchange_rate(base, quote)`·`get_market_calendar(country, date=None)`·`get_all_stocks(market, *, status=None, security_type=None, common_share=None)`(`STOCK_ALL` 1/s, 시장 전체라 큼)·수급 5종 `get_investor_trading`/`get_program_trades`/`get_short_selling`/`get_credit_trades`/`get_securities_lending(symbol, count=10, until=None)`(`STOCK_TRADING_TREND`, 공통 `_trading_trend`)·`get_rankings(type, market_country, duration, *, exclude_investment_caution=False, count=100)`(`RANKING`)·시장지표 `get_indicator_prices(symbols)`(`MARKET_INDICATOR`)·`get_indicator_candles(symbol, interval, count=100, before=None)`(`MARKET_INDICATOR_CHART`)·`get_index_investor_trading(symbol, interval, count=10, until=None)`(`MARKET_INDICATOR`, KOSPI·KOSDAQ). 선택 파라미터는 `_drop_none` 으로 준 것만 보냄
 - 계좌/자산/주문(계좌헤더 O): `get_accounts()→Account[]`(`account_seq` 를 지정하지 않았으면 첫 호출 시 첫 계좌의 `accountSeq` 캐싱)·`get_holdings(symbol=None)`·`get_buying_power(currency)→BuyingPower`·`get_sellable_quantity(symbol)`·`get_commissions()`·`list_orders(status="OPEN", symbol=None, cursor=None, limit=20)`·`get_order(order_id)`
-- 주문 write: `place_order(*, symbol, side, order_type, quantity=None, price=None, order_amount=None, time_in_force="DAY", client_order_id=None, confirm_high_value_order=False)→OrderResponse`·`modify_order(order_id, *, order_type, price=None, quantity=None, confirm_high_value_order=False)`·`cancel_order(order_id)`
-- 조건주문(계좌헤더 O, `CONDITIONAL_ORDER` 5/s · 조회 `CONDITIONAL_ORDER_HISTORY` 10/s): `create_conditional_order(*, symbol, type, quantity, order_type, expire_date, first, second=None, client_order_id=None, confirm_high_value_order=False)`·`modify_conditional_order(id, *, type, quantity, order_type, expire_date, first, second=None, confirm_high_value_order=False)`(취소+재생성이라 **새 id** 반환)·`cancel_conditional_order(id)→None`(204)·`list_conditional_orders(status="OPEN", symbol=None, cursor=None, limit=20)`·`get_conditional_order(id)`. `first`/`second` 는 **API 형태 dict 그대로**(`orderSide`·`triggerPrice`·`orderPrice?`, 가격 문자열) — 공통 필드는 `_conditional_payload` 한 곳. 전부 dict 반환(얇은 엔드포인트).
+- 주문 write: `place_order(*, symbol, side, order_type, quantity=None, price=None, order_amount=None, time_in_force="DAY", client_order_id=None, confirm_high_value_order=False, send_within=None)→OrderResponse`·`modify_order(order_id, *, order_type, price=None, quantity=None, confirm_high_value_order=False)`·`cancel_order(order_id)`
+- 조건주문(계좌헤더 O, `CONDITIONAL_ORDER` 5/s · 조회 `CONDITIONAL_ORDER_HISTORY` 10/s): `create_conditional_order(*, symbol, type, quantity, order_type, expire_date, first, second=None, client_order_id=None, confirm_high_value_order=False, send_within=None)`·`modify_conditional_order(id, *, type, quantity, order_type, expire_date, first, second=None, confirm_high_value_order=False)`(취소+재생성이라 **새 id** 반환)·`cancel_conditional_order(id)→None`(204)·`list_conditional_orders(status="OPEN", symbol=None, cursor=None, limit=20)`·`get_conditional_order(id)`. `first`/`second` 는 **API 형태 dict 그대로**(`orderSide`·`triggerPrice`·`orderPrice?`, 가격 문자열) — 공통 필드는 `_conditional_payload` 한 곳. 전부 dict 반환(얇은 엔드포인트).
 - `access_token()→str` — 캐시/갱신된 OAuth 토큰(스트림 핸드셰이크용 공개 접근자).
 - **실시간 스트림 `stream.py`** — `TossInvestStream(client, *, url=WS_URL, ping_interval=60)`, async 컨텍스트매니저. `__aenter__` 가 `asyncio.to_thread(client.access_token)` 로 토큰을 받아 `websockets.asyncio.client.connect(..., additional_headers={Authorization})`(websockets 는 **`[ws]` extra, `__aenter__` 안에서만 import** — 기본 설치에 안 끌려옴), keepalive 태스크가 `ping_interval` 마다 텍스트 `PING` 전송(서버는 클라 수신 180초 없으면 끊음). `subscribe(list)` = 구독 전체 교체(`[]` 전체 해제), `async for frame in stream` 은 JSON 프레임 dict 를 내주고 `pong` 은 거른다. 재연결·재구독은 호출자 몫(`personal:order` 는 연결 안에서만 무손실 → 재연결 후 `list_orders` 재동기화). 테스트는 로컬 websockets 서버(`tests/test_stream.py`)로 헤더·구독·PING·프레임 검증 — **실 토스 WS 라이브 검증은 아직 안 함**.
 - 진행형 typing: **코어**(accounts/prices/buying-power/orders)는 타입 모델 반환, **얇은** 엔드포인트(holdings/candles/stocks/…)는 언래핑된 `result`(dict/list) 그대로 반환 — 의도된 설계지 TODO 아님.
@@ -56,6 +56,14 @@ HTTP 연결은 `_HTTP_LIMITS` 로 유휴 60초까지 재사용한다. httpx 기�
 4. **401 + `code` ∈ `_REISSUE_TOKEN_CODES`(`expired-token`·`token-revoked`) → `token.invalidate(token)` 후 재발급해 재시도, 최대 2회(`_MAX_TOKEN_REISSUES`)**(429 카운터 보존). 넘긴 `token` 은 이 요청이 실어 보낸 토큰이다. 재발급한 토큰이 재시도가 닿기 전에 또 죽는 건 같은 키로 다른 프로세스도 발급하고 있다는 뜻이라, 둘째 재발급 전에는 짧은 jitter(`_REISSUE_JITTER_SEC`) 만큼 쉬어 서로 엇갈리게 한다. `token-revoked` 는 토스가 client 당 토큰 1개만 살려 두기 때문 — 같은 키로 다른 프로세스가 발급하면 이쪽 토큰이 죽는다(두 프로세스가 번갈아 쓰면 호출마다 재발급 핑퐁, `AUTH` 5/s).
 5. **429 + 잔여 시도 있음 → `backoff_wait(attempt, retry_after)` 만큼 sleep 후 같은 요청 재시도**(`_attempt` 파라미터로 횟수 추적). 소진 시 `RateLimitError` 던짐. **5xx·타임아웃은 재시도 안 함**.
 6. 그 외 비2xx → `error_from_response(status, body, headers)` 던짐.
+
+### 전송 시한 (`send_within`)
+
+`place_order` 와 `create_conditional_order` 는 `send_within=<초>` 를 받는다. 그 시간이 지나면 요청을 더 보내지 않고 `SendDeadlineError` 를 던진다. `clientOrderId` 로 재시도할 때 쓴다: 토스는 그 id 를 10분만 기억하므로, 레이트 게이트나 429 백오프로 재시도가 그보다 늦게 전송되면 새 주문으로 접수된다.
+
+- 시한은 호출 하나에 하나다(`_request` 진입 때 한 번 정해 재귀 재시도에 `_deadline` 으로 넘긴다). 재시도마다 다시 재지 않는다.
+- 검사 지점: 게이트 대기·429 백오프·재발급 jitter 는 `_pause` 가 시한을 넘길 대기면 자지 않고 바로 던진다. 계좌 조회와 토큰 발급은 이 호출이 끊을 수 없는 대기라, HTTP 전송 직전에 `_stop_if_late` 로 한 번 더 본다.
+- `SendDeadlineError` 가 났다면 그 호출은 아무것도 체결시키지 못한 것이다. 호출 안에서 다시 보내는 경우는 429 와 401 재발급뿐이고, 둘 다 요청이 처리되지 않았다는 응답이다.
 
 ### 스레드 공유
 
@@ -104,5 +112,6 @@ SDK 는 프로토콜만 정의한다. 구현은 `pytossinvest-mcp` 의 `RedisTok
 
 ## 이력
 
+- 2026-11-12 전송 시한 `send_within` 과 `SendDeadlineError` 추가(0.0.4).
 - 2026-11-12 경로 값을 인코딩에서 거부로 변경(`/ \ % ? # ;`·공백·제어문자). 토큰 재발급 재시도를 1회에서 2회로, `TokenCache` seam 추가(`token_cache=`).
 - 2026-11-12 스레드 공유 지원(토큰 발급을 락으로 한 번에 묶음, `invalidate(token)`, 계좌 조회·버킷 락). 그전엔 MCP 병렬 툴콜 4개 중 3개가 `token-revoked` 로 실패했다. 경로 값 인코딩(`_path_seg`), 비표준 에러 본문·토큰 응답 처리, 레이트리밋 헤더 검증과 게이트 대기 상한, `account_seq` 옵션, `to_decimal` 비유한값 거부 추가. keepalive 60초(실측: 새 연결 53ms 중 핸드셰이크 39ms, 재사용 약 15ms, 서버는 유휴 130초까지 연결 유지). 쓰이지 않던 `AUTH` 버킷과 `_request(data=)` 제거.

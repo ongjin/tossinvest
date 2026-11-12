@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-Apache--2.0-d22128)
-![tests](https://img.shields.io/badge/tests-306%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-310%20passing-2ea44f)
 ![status](https://img.shields.io/badge/Toss%20API-available-2ea44f)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -204,6 +204,8 @@ place_order(confirmation_token) ────────────┘
 
 **실패했을 때 일일 한도 예약**은 체결이 확실히 안 된 경우에만 풀립니다(paper 의 실패, live 첫 시도의 4xx 거부). 타임아웃·5xx·`409 request-in-progress` 처럼 결과를 모르면 예약을 남겨 두고, 그 뒤의 재시도가 거부돼도 풀지 않습니다. 재시도가 성공하면 한 번만 셉니다. 정정은 늘어난 금액만 한도에 더합니다. 주문을 줄이거나 취소해도 그날 한도는 돌려받지 않습니다.
 
+같은 토큰의 재시도는 preview 후 **9분 30초 안에만 전송**됩니다. 토스가 `clientOrderId` 를 10분만 기억하므로, 레이트리밋 대기로 그보다 늦어진 재전송은 새 주문이 되기 때문입니다. 시한을 넘기면 보내지 않고 `send-deadline-exceeded` 로 끝나며, 다시 주문하기 전에 주문 목록을 확인하라고 안내합니다.
+
 MCP 클라이언트가 툴을 **병렬로 호출해도** 한도 계산은 원자적입니다(예약은 락 아래에서, 토큰당 실행은 한 번에 하나).
 
 예약은 주문을 보내기 **전에** 감사로그에 먼저 남깁니다. 그래서 결과를 받지 못했거나 서버가 호출 도중 죽은 주문도 재시작 뒤 한도에 그대로 잡힙니다. 반대로 주문이 나간 뒤 기록에 실패하면 오류로 끝내지 않고 결과에 `warning` 을 붙여 돌려줍니다(오류로 보이면 같은 주문을 한 번 더 내게 되므로).
@@ -247,7 +249,7 @@ MCP 클라이언트가 툴을 **병렬로 호출해도** 한도 계산은 원자
 ## 테스트
 
 ```bash
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests   # 306 passing
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests   # 310 passing
 ```
 
 `FakeClient` + paper 엔진으로 검증 — **라이브 키 불필요, 네트워크 0**. 무거운 로직(가드레일·토큰·paper·market_hours·audit)은 pure 모듈로 분리해 직접 단위테스트하고, `server.py` 는 모드별 **툴 등록 여부**만 검증합니다(MCP 트랜스포트 내부에 의존 안 함).

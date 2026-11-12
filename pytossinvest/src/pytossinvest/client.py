@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from .auth import TokenCache, TokenManager
-from .errors import error_from_response, TossInvestError
+from .errors import error_from_response, SendDeadlineError, TossInvestError
 from .ratelimit import TokenBucket, effective_rate, backoff_wait
 
 __all__ = ["TossInvestClient"]
@@ -110,6 +110,7 @@ class TossInvestClient:
         self._token = TokenManager(client_id, client_secret, http=self._http, now=monotonic,
                                    cache=token_cache)
         self._sleep = sleep
+        self._monotonic = monotonic
         self._now_kst = now_kst
         self._max_retries = max_retries
         self._retry_max_wait = retry_max_wait
@@ -132,7 +133,21 @@ class TossInvestClient:
     def __exit__(self, *exc) -> None:
         self.close()
 
-    def _gate(self, group: str) -> None:
+    def _stop_if_late(self, deadline: float | None, after: float = 0.0) -> None:
+        """Raise when a call with a send deadline has reached it, or would after `after` more
+        seconds. Nothing is sent from then on."""
+        if deadline is not None and self._monotonic() + after >= deadline:
+            raise SendDeadlineError(
+                "send-deadline-exceeded", "the request could not be sent within send_within"
+            )
+
+    def _pause(self, seconds: float, deadline: float | None) -> None:
+        """Sleep, unless that would overrun the call's send deadline: waiting only to refuse
+        at the end helps nobody."""
+        self._stop_if_late(deadline, after=seconds)
+        self._sleep(seconds)
+
+    def _gate(self, group: str, deadline: float | None = None) -> None:
         bucket = self._buckets.get(group)
         if bucket is None:
             return
@@ -150,7 +165,7 @@ class TossInvestClient:
                     return
                 wait = bucket.time_until_available()
 
-            self._sleep(wait)  # outside the lock: other threads keep moving
+            self._pause(wait, deadline)  # outside the lock: other threads keep moving
 
     def _sync_bucket_from_headers(self, group: str, headers) -> None:
         """Reconcile a group's bucket to the server's X-RateLimit-* headers (source of truth).
@@ -196,21 +211,32 @@ class TossInvestClient:
         account: bool = False,
         params: dict | None = None,
         json: dict | None = None,
+        send_within: float | None = None,
+        _deadline: float | None = None,
         _reissues: int = 0,
         _attempt: int = 0,
     ) -> Any:
+        """send_within: seconds from now after which the request must not be sent any more
+        (SendDeadlineError). For a request with an idempotency key that the server remembers
+        for a limited time: a retry held up by rate limiting until after that time would be
+        taken as a new request."""
+        if send_within is not None:
+            _deadline = self._monotonic() + send_within
         if account and self._account_seq is None:
             with self._account_lock:  # threads arriving together share one lookup
                 if self._account_seq is None:
                     self.get_accounts()  # caches the first account's accountSeq
             if self._account_seq is None:
                 raise RuntimeError("account context required but the API returned no account")
-        self._gate(group)
+        self._gate(group, _deadline)
         token = self._token.get_token()
         headers = {"Authorization": f"Bearer {token}"}
         if account:
             headers["X-Tossinvest-Account"] = str(self._account_seq)
 
+        # last look: the account lookup and the token issue above are not sleeps this call
+        # can cut short
+        self._stop_if_late(_deadline)
         resp = self._http.request(method, path, params=params, json=json, headers=headers)
         self._sync_bucket_from_headers(group, resp.headers)
 
@@ -246,10 +272,10 @@ class TossInvestClient:
         if reissue:
             self._token.invalidate(token)  # a no-op if another thread already re-issued
             if _reissues:
-                self._sleep(self._rng() * _REISSUE_JITTER_SEC)
+                self._pause(self._rng() * _REISSUE_JITTER_SEC, _deadline)
             return self._request(
-                method, path, group=group, account=account,
-                params=params, json=json, _reissues=_reissues + 1, _attempt=_attempt,
+                method, path, group=group, account=account, params=params, json=json,
+                _deadline=_deadline, _reissues=_reissues + 1, _attempt=_attempt,
             )
 
         if resp.status_code == 429 and _attempt < self._max_retries:
@@ -260,11 +286,11 @@ class TossInvestClient:
                     retry_after = float(raw)
                 except (TypeError, ValueError):
                     retry_after = None
-            self._sleep(backoff_wait(_attempt, retry_after,
-                                     cap=self._retry_max_wait, rng=self._rng))
+            self._pause(backoff_wait(_attempt, retry_after,
+                                     cap=self._retry_max_wait, rng=self._rng), _deadline)
             return self._request(
-                method, path, group=group, account=account,
-                params=params, json=json, _reissues=_reissues, _attempt=_attempt + 1,
+                method, path, group=group, account=account, params=params, json=json,
+                _deadline=_deadline, _reissues=_reissues, _attempt=_attempt + 1,
             )
 
         raise error
@@ -403,7 +429,10 @@ class TossInvestClient:
                     quantity: str | None = None, price: str | None = None,
                     order_amount: str | None = None, time_in_force: str = "DAY",
                     client_order_id: str | None = None,
-                    confirm_high_value_order: bool = False) -> "OrderResponse":
+                    confirm_high_value_order: bool = False,
+                    send_within: float | None = None) -> "OrderResponse":
+        """send_within bounds how late the order may still be sent (see _request). Give it
+        when retrying with a client_order_id: the API deduplicates that id for 10 minutes."""
         from .models import OrderResponse
         payload: dict = {"symbol": symbol, "side": side, "orderType": order_type,
                          "timeInForce": time_in_force, "confirmHighValueOrder": confirm_high_value_order}
@@ -415,7 +444,8 @@ class TossInvestClient:
             payload["orderAmount"] = order_amount
         if client_order_id is not None:
             payload["clientOrderId"] = client_order_id
-        result = self._request("POST", "/api/v1/orders", group="ORDER", account=True, json=payload)
+        result = self._request("POST", "/api/v1/orders", group="ORDER", account=True,
+                               json=payload, send_within=send_within)
         return OrderResponse.model_validate(result)
 
     def modify_order(self, order_id: str, *, order_type: str, price: str | None = None,
@@ -445,15 +475,17 @@ class TossInvestClient:
     def create_conditional_order(self, *, symbol: str, type: str, quantity: str, order_type: str,
                                  expire_date: str, first: dict, second: dict | None = None,
                                  client_order_id: str | None = None,
-                                 confirm_high_value_order: bool = False) -> dict:
-        """Register a SINGLE / OCO / OTO order that fires when its trigger price is reached."""
+                                 confirm_high_value_order: bool = False,
+                                 send_within: float | None = None) -> dict:
+        """Register a SINGLE / OCO / OTO order that fires when its trigger price is reached.
+        send_within works as in place_order."""
         payload = self._conditional_payload(type, quantity, order_type, expire_date, first, second,
                                             confirm_high_value_order)
         payload["symbol"] = symbol
         if client_order_id is not None:
             payload["clientOrderId"] = client_order_id
         return self._request("POST", "/api/v1/conditional-orders", group="CONDITIONAL_ORDER",
-                             account=True, json=payload)
+                             account=True, json=payload, send_within=send_within)
 
     def modify_conditional_order(self, conditional_order_id: str, *, type: str, quantity: str,
                                  order_type: str, expire_date: str, first: dict,

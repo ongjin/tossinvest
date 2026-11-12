@@ -210,3 +210,13 @@ def test_cancel_respects_the_allow_list(app_factory, fake_client):
         C.cancel_conditional_order(app, "co-1")   # co-1 is a 005930 order
     assert e.value.code == "symbol-not-allowed"
     assert ("cancel_conditional_order", "co-1") not in fake_client.calls
+
+
+def test_conditional_order_is_sent_with_its_send_deadline(app_factory, fake_client):
+    app = _live(app_factory)
+    pv = C.preview_conditional_order(app, **SINGLE)
+
+    T.place_order(app, confirmation_token=pv["confirmationToken"])
+
+    sent = [c[1] for c in fake_client.calls if c[0] == "create_conditional_order"][-1]
+    assert sent["send_within"] == 570.0  # 600s window - 30s margin, no time gone

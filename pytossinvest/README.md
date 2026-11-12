@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-MIT-3da639)
-![tests](https://img.shields.io/badge/tests-148%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-155%20passing-2ea44f)
 ![status](https://img.shields.io/badge/Toss%20API-available-2ea44f)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -25,7 +25,7 @@
 | 🔁 **멱등성** | `clientOrderId` 로 중복주문 방지 — 네트워크 단절로 응답을 못 받아도 같은 키로 재시도하면 두 번 체결되지 않음(서버측 ~10분 유효). |
 | 🧩 **에러는 `code` 로 분기** | `message` 가 비어도 OK. 서버가 **모르는 code/enum 을 추가해도 안 깨짐**(관용적 파싱). |
 | 🔐 **토큰 생애주기** | 만료 30초 전까지 메모리 캐싱·자동 갱신(`expires_in` 이 30초 이하라도 과거 시각으로 뭉개지지 않게 `max(0, …)` 클램프), `401 expired-token`·`token-revoked`(같은 키로 다른 프로세스가 토큰을 받으면 이전 토큰 무효) 시 1회 재발급 후 재시도. |
-| ✅ **라이브 키 없이 그린** | `pytest` → **148개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
+| ✅ **라이브 키 없이 그린** | `pytest` → **155개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
 
 ---
 
@@ -283,6 +283,12 @@ except BusinessRuleError as e:
 
 `place_order(client_order_id="my-001")` — 같은 `clientOrderId` 로 재시도하면 서버가 중복을 막아 **두 번 체결되지 않습니다**(서버측 ~10분 유효). `clientOrderId` 는 **자동 생성하지 않으니** 호출자가 직접 부여해야 합니다.
 
+재시도할 때는 `send_within=<초>` 로 **전송 시한**을 같이 주세요. 그 시간이 지나면 요청을 보내지 않고 `SendDeadlineError` 를 던집니다. 레이트리밋 대기 때문에 재시도가 10분 뒤에 전송되면 서버는 새 주문으로 받기 때문입니다.
+
+```python
+c.place_order(..., client_order_id="my-001", send_within=540)  # 지금부터 9분 안에만 보낸다
+```
+
 ---
 
 ## 레이트리밋 / 재시도 동작 (v0.0.2)
@@ -297,7 +303,7 @@ except BusinessRuleError as e:
 ## 테스트
 
 ```bash
-uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # 148 passing
+uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # 155 passing
 ```
 
 `respx` 로 httpx 를 mock 합니다 — **라이브 키 불필요, 네트워크 0**. `git clone && uv sync && pytest` 면 그린.

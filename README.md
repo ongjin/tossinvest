@@ -41,7 +41,7 @@ decimal·레이트리밋·멱등성까지 제대로 다룬 **SDK** + LLM 에게 
 | 🔁 **멱등성** | `clientOrderId` 자동 관리 — 네트워크 단절로 응답을 못 받아도 같은 키로 재시도해 **중복주문 방지**. |
 | 🧩 **에러는 `code` 로 분기** | `message` 가 비어도 OK. 서버가 **모르는 코드/enum 을 추가해도 안 깨짐**. |
 | 🔐 **토큰 생애주기** | 만료 전 갱신·메모리 캐싱, `401 expired-token` 시 1회 재발급 후 재시도. |
-| ✅ **라이브 키 없이 그린** | `git clone` 뒤 `uv run --all-packages --all-extras pytest` → **454개 테스트** 통과. 기여 장벽 0. |
+| ✅ **라이브 키 없이 그린** | `git clone` 뒤 `uv run --all-packages --all-extras pytest` → **465개 테스트** 통과. 기여 장벽 0. |
 
 ---
 
@@ -141,8 +141,8 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 
 ```bash
 # 테스트 — 라이브 키 불필요
-uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # 148 passing
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # 306 passing
+uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # 155 passing
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # 310 passing
 uv run --all-packages --all-extras pytest                                 # 둘 다 한 번에 (루트)
 ```
 

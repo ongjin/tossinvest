@@ -9,8 +9,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 IDEMPOTENCY_WINDOW_SEC = 600  # how long the broker remembers a clientOrderId
 # A same-token retry sent after that window is a second order that the reservation dedup
-# counts only once. The token's age is checked when a call starts, and the send itself can
-# be held up after that (rate-limit backoff), so half the window is left for it.
+# counts only once. safety.send_within() makes the SDK refuse to send that late, counted
+# from the preview, with this much room for the request to travel and for clock drift
+# between instances.
+SEND_MARGIN_SEC = 30
+# A token must not be accepted when little time to send is left: half the window stays free.
 MAX_CONFIRMATION_TTL_SEC = IDEMPOTENCY_WINDOW_SEC // 2
 
 
