@@ -3,8 +3,11 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+IDEMPOTENCY_WINDOW_SEC = 600  # how long the broker remembers a clientOrderId
 
 
 class Settings(BaseSettings):
@@ -16,6 +19,8 @@ class Settings(BaseSettings):
     client_id: str = ""
     client_secret: str = ""
     base_url: str = "https://openapi.tossinvest.com"
+    # account that account-scoped calls use (Account.accountSeq). unset = the first account.
+    account_seq: int | None = None
 
     # mode (default safe). live requires allow_live too.
     mode: Literal["read_only", "paper", "live"] = "paper"
@@ -34,8 +39,9 @@ class Settings(BaseSettings):
     # paper engine (per-currency cash buckets; scalar is wrapped as {"KRW": ...})
     paper_starting_cash: dict[str, Decimal] = {"KRW": Decimal("10000000")}
 
-    # preview -> confirm window
-    confirmation_ttl_sec: int = 120
+    # preview -> confirm window. Capped at the broker's clientOrderId idempotency window: a
+    # same-token retry after that would be a second order the reservation counts only once.
+    confirmation_ttl_sec: int = Field(default=120, le=IDEMPOTENCY_WINDOW_SEC)
     # live-only: minimum seconds between preview and place (0 = off). 권장 live+수동 5.
     live_confirm_min_delay_sec: int = 0
 

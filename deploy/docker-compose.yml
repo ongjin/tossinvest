@@ -25,6 +25,9 @@ services:
       # OPTIONAL Host pinning (defense-in-depth). Uncomment ONLY together with the
       # matching .env line — the value must be a non-empty JSON list (empty fails to parse).
       # TOSSINVEST_HTTP_ALLOWED_HOSTS: ${TOSSINVEST_HTTP_ALLOWED_HOSTS}
+      # OPTIONAL account choice when the Toss login has more than one account. Uncomment
+      # ONLY together with the matching .env line (an empty value fails to parse).
+      # TOSSINVEST_ACCOUNT_SEQ: ${TOSSINVEST_ACCOUNT_SEQ}
     depends_on:
       - redis
     ports:

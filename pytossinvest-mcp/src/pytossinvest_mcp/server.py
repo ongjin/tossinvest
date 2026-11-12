@@ -348,12 +348,16 @@ def run_server(settings: Settings, mcp) -> None:
         mcp.run()  # stdio transport (default) for MCP clients like Claude Desktop
 
 
-def main() -> None:
-    settings = Settings()
+def build_client(settings: Settings):
     from pytossinvest import TossInvestClient
 
-    client = TossInvestClient(
-        settings.client_id, settings.client_secret, base_url=settings.base_url
+    return TossInvestClient(
+        settings.client_id, settings.client_secret, base_url=settings.base_url,
+        account_seq=settings.account_seq,
     )
-    mcp = build_server(settings, client=client)
+
+
+def main() -> None:
+    settings = Settings()
+    mcp = build_server(settings, client=build_client(settings))
     run_server(settings, mcp)
