@@ -147,15 +147,16 @@ def test_modify_accrues_delta_to_daily_bucket(app_factory, fake_client):
     assert app.safety.spend_store.current(day, "KRW") == Decimal("10000")  # M1: delta accrued
 
 
-def test_modify_downsize_credits_with_floor(app_factory, fake_client):
+def test_modify_downsize_refunds_nothing(app_factory, fake_client):
+    # like a cancel: making an order smaller does not hand today's budget back
     from datetime import date
     app = app_factory(mode="live", allow_live=True, enforce_market_hours=False)
     day = date(2026, 6, 17).isoformat()
     app.safety.spend_store.seed(day, "KRW", Decimal("700000"))  # prior bucket
-    # original real-1 = 700,000 ; modify down to 60000*10 = 600,000 ; delta -100,000
+    # original real-1 = 700,000 ; modify down to 60000*10 = 600,000
     pv = T.preview_modify(app, "real-1", order_type="LIMIT", price="60000")
     T.modify_order(app, confirmation_token=pv["confirmationToken"])
-    assert app.safety.spend_store.current(day, "KRW") == Decimal("600000")  # 700,000 - 100,000 (credited)
+    assert app.safety.spend_store.current(day, "KRW") == Decimal("700000")
 
 
 def test_preview_modify_enforces_per_order_cap(app_factory, fake_client):
@@ -348,3 +349,102 @@ def test_cancel_order_respects_the_deny_list(app_factory, fake_client):
         T.cancel_order(app, "real-1")   # real-1 is a 005930 order
     assert e.value.code == "symbol-denied"
     assert not [c for c in fake_client.calls if c[0] == "cancel_order"]
+
+
+def _place_600k_failing_with(app, fake_client, *errors):
+    """Preview one 600,000 order, then place it once per error with the same token."""
+    attempts = iter(errors)
+
+    def fail(**kwargs):
+        raise next(attempts)
+    fake_client.place_order = fail
+
+    pv = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                         quantity="6", price="100000")
+    for error in errors:
+        with pytest.raises(type(error)):
+            T.place_order(app, confirmation_token=pv["confirmationToken"])
+
+
+def test_request_in_progress_keeps_reservation(app_factory, fake_client):
+    # 409 request-in-progress: the same clientOrderId is still being processed and may fill
+    from pytossinvest.errors import ConflictError
+    app = _live_cap_app(app_factory)
+
+    _place_600k_failing_with(
+        app, fake_client, ConflictError("request-in-progress", "", http_status=409))
+
+    assert _fresh_600k_fits(app) is False
+
+
+def test_refusal_of_a_retry_keeps_a_reservation_whose_first_attempt_is_unknown(
+        app_factory, fake_client):
+    # the first attempt may have filled; a 401 on the retry never reached order handling,
+    # so it proves nothing about the first
+    from pytossinvest.errors import AuthError, ServerError
+    app = _live_cap_app(app_factory)
+
+    _place_600k_failing_with(
+        app, fake_client,
+        ServerError("internal-error", "", http_status=503),
+        AuthError("token-revoked", "", http_status=401),
+    )
+
+    assert _fresh_600k_fits(app) is False
+
+
+def test_refusal_of_a_first_attempt_still_releases(app_factory, fake_client):
+    from pytossinvest.errors import AuthError
+    app = _live_cap_app(app_factory)
+
+    _place_600k_failing_with(app, fake_client, AuthError("token-revoked", "", http_status=401))
+
+    assert _fresh_600k_fits(app) is True
+
+
+def test_modify_refusal_after_an_unknown_outcome_keeps_reservation(app_factory, fake_client):
+    # the first modify may have applied (+10,000) before the order filled; "already-filled"
+    # on the retry does not undo it
+    from datetime import date
+    from pytossinvest.errors import ConflictError
+    app = app_factory(mode="live", allow_live=True, enforce_market_hours=False)
+    attempts = iter([RuntimeError("connection reset"),
+                     ConflictError("already-filled", "", http_status=409)])
+
+    def fail(order_id, **kwargs):
+        raise next(attempts)
+    fake_client.modify_order = fail
+
+    pv = T.preview_modify(app, "real-1", order_type="LIMIT", price="71000")
+    with pytest.raises(RuntimeError):
+        T.modify_order(app, confirmation_token=pv["confirmationToken"])
+    with pytest.raises(ConflictError):
+        T.modify_order(app, confirmation_token=pv["confirmationToken"])
+
+    assert app.safety.spend_store.current(date(2026, 6, 17).isoformat(), "KRW") == Decimal("10000")
+
+
+def test_downsizing_an_order_never_counted_here_frees_no_budget(app_factory, fake_client):
+    # An order placed in the app was never counted by this server. If shrinking it through
+    # the MCP lowered today's total, new orders could go out past the cap.
+    app = _live_cap_app(app_factory)  # daily cap 1,000,000
+    pv = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                         quantity="6", price="100000")
+    T.place_order(app, confirmation_token=pv["confirmationToken"])  # counted: 600,000
+
+    # the app order: 70000 x 10 = 700,000 -> 10000 x 10 = 100,000
+    pm = T.preview_modify(app, "app-order", order_type="LIMIT", price="10000")
+    T.modify_order(app, confirmation_token=pm["confirmationToken"])
+
+    assert _fresh_600k_fits(app) is False  # 600,000 + 600,000 > 1,000,000
+
+
+def test_unreadable_success_response_keeps_reservation(app_factory, fake_client):
+    # the SDK raises for a 200 it cannot read, but a 200 means the broker took the order
+    from pytossinvest.errors import TossInvestError
+    app = _live_cap_app(app_factory)
+
+    _place_600k_failing_with(
+        app, fake_client, TossInvestError("missing-result", "", http_status=200))
+
+    assert _fresh_600k_fits(app) is False

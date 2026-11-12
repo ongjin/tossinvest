@@ -125,3 +125,34 @@ def test_conditional_tokens_live_outside_the_ordinary_key_space(r):
     assert s.get("t4")[0].kind == "conditional"
     s.delete("t4")
     assert s.get("t4") is None
+
+
+def test_token_claim_is_shared_between_instances_and_expires(r):
+    a, b = RedisTokenStore(r), RedisTokenStore(r)
+    assert a.claim("t1") is True
+    assert b.claim("t1") is False  # another instance is executing it
+    assert r.ttl("claim:t1") > 0   # a crashed instance cannot pin the token forever
+    a.unclaim("t1")
+    assert b.claim("t1") is True
+
+
+def test_spend_reserved_reports_a_held_reservation(r):
+    s = RedisSpendStore(r)
+    assert s.reserved("d", "c1") is False
+    s.reserve("d", "KRW", Decimal("100"), Decimal("1000"), "c1")
+    assert s.reserved("d", "c1") is True
+    s.release("d", "KRW", Decimal("100"), "c1")
+    assert s.reserved("d", "c1") is False
+
+
+@pytest.mark.parametrize("error", ["ConnectionError", "TimeoutError"])
+def test_redis_py_errors_become_state_unavailable(error):
+    # redis-py's exceptions do not derive from the builtin ConnectionError / TimeoutError
+    import redis
+    from pytossinvest_mcp.safety import GuardrailError, _guard_store
+
+    def unreachable():
+        raise getattr(redis.exceptions, error)("redis is down")
+
+    with pytest.raises(GuardrailError, match="state-unavailable"):
+        _guard_store(unreachable)

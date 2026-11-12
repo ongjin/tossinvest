@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import contextlib
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, replace
 from decimal import Decimal
 from typing import Callable, Protocol
 
@@ -60,12 +60,24 @@ class MemoryPaperStore:
             cash=cash, positions={}, orders=[],
             realized_pnl={cur: Decimal("0") for cur in cash}, counter=0,
         )
+        self._lock = threading.Lock()  # tools run in worker threads: fills must not interleave
 
     def lock(self):
-        return contextlib.nullcontext()
+        return self._lock
 
     def load(self) -> PaperState:
-        return self._state
+        # A snapshot, like the redis store: readers run without the lock while fills go on,
+        # and a fill that raises half-way leaves the stored state untouched. A fill updates
+        # positions in place, so those are copied; recorded orders never change, so the list
+        # is copied but its orders are shared (a deep copy would cost more with every order).
+        state = self._state
+        return PaperState(
+            cash=dict(state.cash),
+            positions={symbol: replace(p) for symbol, p in state.positions.items()},
+            orders=list(state.orders),
+            realized_pnl=dict(state.realized_pnl),
+            counter=state.counter,
+        )
 
     def save(self, state: PaperState) -> None:
         self._state = state

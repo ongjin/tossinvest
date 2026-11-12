@@ -112,3 +112,21 @@ def test_place_is_idempotent_by_client_order_id():
     assert o2.order_id == o1.order_id          # same order returned, not a second fill
     assert len(b.list_orders()) == 1
     assert b.holdings()["items"][0]["quantity"] == "1"  # only one fill applied
+
+
+def test_memory_store_hands_out_snapshots():
+    # a reader iterating its copy cannot be disturbed by a fill, and a fill that fails
+    # half-way cannot leave the stored state half-changed
+    store = MemoryPaperStore(starting_cash="1000")
+    PaperBroker(store).place(symbol="005930", side="BUY", order_type="LIMIT",
+                             fill_price="100", quantity="2", currency="KRW")
+
+    snapshot = store.load()
+    snapshot.cash["KRW"] = Decimal("0")
+    snapshot.positions["005930"].quantity = Decimal("0")  # a fill updates positions in place
+    snapshot.orders.append("not saved")
+
+    stored = store.load()
+    assert stored.cash["KRW"] == Decimal("800")
+    assert stored.positions["005930"].quantity == Decimal("2")
+    assert len(stored.orders) == 1
