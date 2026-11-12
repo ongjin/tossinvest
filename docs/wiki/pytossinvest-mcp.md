@@ -52,7 +52,7 @@ tools.py      ← AppContext + 툴 함수 fn(app, ...). 라우팅(paper vs real)
 - **`run_server(settings, mcp)`**: http 면 `build_http_app(mcp, auth_token=settings.auth_token)` → `serve_http(app, host, port)`. stdio 면 `mcp.run()`.
 - **`http.py`**: `BearerAuthMiddleware(BaseHTTPMiddleware)` — `hmac.compare_digest` 상수시간 bearer 검증(**bytes 비교** — str 은 비ASCII 에서 `TypeError`→500), 실패 시 401. `build_http_app(mcp, *, auth_token)` — `mcp.streamable_http_app()` 에 미들웨어 추가 후 Starlette 앱 반환. `serve_http(app, *, host, port)` — uvicorn runner(함수 내부에서만 `import uvicorn` — `[http]` extra).
 - **직교성**: transport 축은 `MODE`(read_only/paper/live) 및 `STATE_BACKEND`(memory/redis)와 독립. 어떤 조합이든 동작. 다중 인스턴스 HA = `http` + `redis` 백엔드 조합 권장.
-- **Phase 2(인스턴스 간 공유 레이트리미터·OAuth 토큰캐시)는 의도적 보류 (2026-06-19 결정, YAGNI)** — redis 백엔드가 공유하는 건 **spend 카운터·paper 상태·confirmation 토큰**까지다. **SDK 의 레이트리밋(`ratelimit.TokenBucket`)과 OAuth 토큰(`auth.TokenManager`)은 여전히 프로세스 로컬**이라, 다중 인스턴스를 동시에 띄우면 각자 별도 버킷/토큰을 갖는다(토스 per-account 한도는 인스턴스 간 미공유 — 초과 시 `X-RateLimit-*` 헤더동기화 + 429 bounded retry 로 수습). 단일테넌트(유저 1명)·저부하라 **1-인스턴스로 충분**하므로 공유 토큰버킷은 만들지 않았다. 진짜로 여러 인스턴스를 LB 뒤에서 동시 구동해 한도를 공유해야 하는 실수요가 생기면 그때 SDK 에 seam 을 뚫는다(설계 시점 기록: `docs/superpowers/specs/2026-06-18-self-host-remote-mcp-design.md §8` Phase 2).
+- **인스턴스 간 공유 범위** — redis 백엔드가 공유하는 건 spend 카운터·paper 상태·confirmation 토큰·**토스 액세스 토큰**(아래 '액세스 토큰 공유')이다. SDK 의 레이트리밋 버킷(`ratelimit.TokenBucket`)은 프로세스 로컬이라 인스턴스마다 따로 센다. 토스의 한도는 계정 단위라 합산하면 넘을 수 있고, 그때는 `X-RateLimit-*` 헤더 동기화와 429 유계 재시도로 수습한다. 공유 레이트리미터는 만들지 않았다(단일테넌트·저부하. 설계 시점 기록: `docs/superpowers/specs/2026-06-18-self-host-remote-mcp-design.md §8`).
 
 ## 가드레일 (`safety.check_guardrails`, 순서 중요)
 
@@ -80,10 +80,11 @@ deny심볼 → allow심볼 → **하드실링 초과 무조건 거부**(`max-ord
 - `consume(token)` — 존재·만료 검증 후 spec 반환. **pop 안 함**(만료면 삭제 후 `expired-confirmation`, 없으면 `invalid-confirmation`). **live 최소지연 게이트**: `config.live_confirm_min_delay_sec > 0` 이고 `config.is_live` 이면 `now - issued_at < delay` 일 때 `confirm-too-soon`.
 - `executing(token)` — place/modify 한 번의 실행 동안 토큰을 잡는 컨텍스트매니저(`token_store.claim` / `unclaim`). 같은 토큰의 호출이 겹치면 두 번째는 `confirmation-in-progress` 로 거부한다. 같은 토큰은 예약 하나를 공유하므로, 두 번째 호출이 브로커까지 가서 거부당하면 첫 번째(성공하는) 호출이 기대는 예약을 풀어 버린다. `unclaim` 중의 store I/O 오류는 삼킨다(claim 은 TTL 로 사라진다. 여기서 예외를 올리면 방금 체결된 주문이 실패로 보여 새 preview 로 다시 나간다).
 - `attempt(spec)` — `reserve` 전에 읽는다. 이 `clientOrderId` 의 예약이 이미 있으면 `Attempt.RETRY`(앞선 호출이 체결 불명으로 끝나 예약이 남아 있다), 없으면 `Attempt.FIRST`.
-- **reserve-first place 흐름**: `place_order` 는 `executing(token)` 으로 토큰을 잡고 `consume` 후 `check_guardrails(check_daily=False)` → `store.reserve(day, currency, notional, cap, clientOrderId)` → 실행 → 성공 시 `store.commit(token)` / 실패 시 `tools._settle_failure` 가 `_is_rejection` 이면 `store.release(day, currency, notional, clientOrderId)`, 아니면 예약 유지(감사 `reservation: released|kept`). `reserve` 는 원자적(`clientOrderId` 멱등 — 같은 키로 중복 예약 시 기존 결과 반환). 실패해도 토큰은 살아있어 재시도 가능.
+- **reserve-first place 흐름**: `place_order` 는 `executing(token)` 으로 토큰을 잡고 `consume` 후 `check_guardrails(check_daily=False)` → `tools._reserve`(`store.reserve(day, currency, notional, cap, clientOrderId)` 뒤 감사로그에 `decision: reserved` 를 먼저 쓴다. 이 줄이 재시작 복원의 근거라, 못 쓰면 예약을 풀고 `state-unavailable` 로 끝내며 주문은 보내지 않는다) → 실행 → 성공 시 `tools._settle_success`(`commit(token)` + 감사 `placed`) / 실패 시 `tools._settle_failure` 가 `_is_rejection` 이면 `store.release(day, currency, notional, clientOrderId)`, 아니면 예약 유지(감사 `reservation: released|kept`). `reserve` 는 원자적(`clientOrderId` 멱등 — 같은 키로 중복 예약 시 기존 결과 반환). 실패해도 토큰은 살아있어 재시도 가능.
 - **reserve-first modify 흐름**: `modify_order` 는 `consume` 후 `check_guardrails(check_daily=True, prev_notional=spec.prev_notional)` → `store.reserve(day, currency, delta, cap, clientOrderId)` → 실행 → 성공 시 `store.commit(token)` / 실패 시 place 와 같은 `_settle_failure`. delta = `max(0, new−old)`. 체결 불명으로 유지된 modify 를 재시도했는데 첫 시도가 이미 반영돼 토스가 4xx 를 주는 경우(`Attempt.RETRY`)에도 예약은 남는다.
-- `restore_spend(events)` — **memory 백엔드 전용**. 부팅 시 audit `read_events()` 결과를 받아 당일(`ts` UTC → KST 날짜 변환) `placed`/`modified` 이벤트의 `notional`·`currency` 를 SpendStore 에 `seed` 로 합산(통화별 0-하한). dict 가 아닌 이벤트, `notional`/`ts` 누락, 파싱 불가 값은 건너뜀(손상 감사 파일이 있어도 부팅 불가 없음). 감사 파일이 없거나 지워지면 복원 누락(누적 0으로 리셋됨 — 주의). **redis 백엔드에서는 `seed` 가 no-op** — counter 가 AOF로 지속, 재시드 시 이중 계산 방지.
-- 멱등성: place/modify 실패 시 토큰 유지 → 동일 `clientOrderId` 로 멱등 재시도. **예약은 `_is_rejection` 일 때만 해제** — paper 는 로컬·원자적이라 항상, live 는 `Attempt.FIRST` 이고 `TossInvestError` 이고 `http_status < 500` 이며 코드가 `_UNSETTLED_CODES`(`request-in-progress`: 같은 `clientOrderId` 가 아직 처리 중, `duplicate-conditional-order`)가 아닐 때만. `Attempt.RETRY` 면 어떤 거부로도 해제하지 않는다: 401·429 는 주문 처리에 닿지 못한 응답이라 앞선 시도에 대해 아무것도 말해 주지 않고, 키가 없는 정정은 재전송이 거부돼도 첫 정정이 반영됐을 수 있다. 타임아웃·연결끊김·5xx 는 체결됐을 수 있어 유지: 같은 토큰 재시도는 dedup 키로 재사용(두 번 안 셈), 새 preview 는 그 위에 쌓여 이중 주문이 한도를 못 넘는다. 확실히 안 된 주문의 예약이 남으면 그날 한도가 그만큼 보수적으로 줄어든다(memory 백엔드는 재시작 시 사라짐 — 복원은 `placed`/`modified` 만 센다). `commit` 후에는 토큰 pop 되어 2차 발사 불가.
+- `restore_spend(events)` — **memory 백엔드 전용**. 부팅 시 audit `read_events()` 결과에서 당일(`ts` UTC → KST 날짜 변환) 이벤트를 읽어, 아직 서 있는 예약을 SpendStore 에 `seed` 한다. 센다: 보내기 전에 쓴 `reserved`, 그리고 `placed`·`modified`. `clientOrderId` 하나당 한 번만 세고, 그 id 에 `error` + `reservation: released` 가 있으면 뺀다. 그래서 결과를 못 남긴 호출(체결 불명으로 `kept`, 또는 호출 도중 프로세스 종료)도 재시작 뒤 한도에 남는다. `clientOrderId` 가 없거나 문자열이 아닌 줄(옛 로그, 손상된 줄)은 줄마다 따로 센다. dict 가 아닌 이벤트, `notional`/`ts` 누락, 파싱 불가 값은 건너뛴다(손상 감사 파일이 있어도 부팅된다). 감사 파일이 없거나 지워지면 누적이 0 으로 돌아간다. **redis 백엔드에서는 `seed` 가 no-op** — counter 가 AOF 로 지속되므로 다시 넣으면 이중 계산이다.
+- **성공 뒤의 기록 실패** — 브로커 호출이 성공한 뒤 `commit` 이나 감사 기록이 실패하면 `_settle_success` 가 예외 대신 결과에 `warning` 을 붙여 돌려준다. 증상(바꾸기 전): redis 가 잠깐 끊기면 이미 나간 주문이 툴 오류로 보였고, 모델의 자연스러운 대응은 새 preview 로 같은 주문을 한 번 더 내는 것이었다. 예약은 이미 세고 로그에 남겼으므로 한도는 잃지 않는다. 실패 쪽(`_settle_failure`)의 예약 해제와 감사 기록도 best-effort 다: 스토어 장애가 브로커의 실제 오류를 가리면 안 된다. 해제하지 못한 예약은 그대로 남는다(과다계상).
+- 멱등성: place/modify 실패 시 토큰 유지 → 동일 `clientOrderId` 로 멱등 재시도. **예약은 `_is_rejection` 일 때만 해제** — `Attempt.RETRY` 면 모드와 무관하게 해제하지 않는다. 첫 시도일 때 paper 는 로컬 체결이라 실패하면 해제하되 paper 스토어 I/O 오류(`_STORE_ERRORS`)는 예외다(redis 에는 체결이 저장된 뒤 끊겼을 수 있다). live 는 `TossInvestError` 이고 `http_status < 500` 이며 코드가 `_UNSETTLED_CODES`(`request-in-progress`: 같은 `clientOrderId` 가 아직 처리 중, `duplicate-conditional-order`)가 아닐 때만. RETRY 에서 해제하지 않는 이유: 401·429 는 주문 처리에 닿지 못한 응답이라 앞선 시도에 대해 아무것도 말해 주지 않고, 키가 없는 정정은 재전송이 거부돼도 첫 정정이 반영됐을 수 있다. 타임아웃·연결끊김·5xx 는 체결됐을 수 있어 유지: 같은 토큰 재시도는 dedup 키로 재사용(두 번 안 셈), 새 preview 는 그 위에 쌓여 이중 주문이 한도를 못 넘는다. 확실히 안 된 주문의 예약이 남으면 그날 한도가 그만큼 보수적으로 줄어든다(memory 백엔드는 재시작 시 사라짐 — 복원은 `placed`/`modified` 만 센다). `commit` 후에는 토큰 pop 되어 2차 발사 불가.
 - **place 시 일일한도 재검사**: `place_order` 는 `consume` 직후 실행 전에 `check_guardrails(spec, ..., check_daily=False)` → `reserve` 가 원자적으로 cap 검사 — preview 를 여러 개 발급해 한도를 초과하는 우회 차단.
 
 ## 상태 백엔드 (memory | redis)
@@ -118,11 +119,11 @@ deny심볼 → allow심볼 → **하드실링 초과 무조건 거부**(`max-ord
 
 `redis>=5` + `fakeredis[lua]>=2`(dev/test). `TOSSINVEST_REDIS_URL` 필요.
 
-- **SpendStore**: day-scope key(`spend:{day}:{currency}`)에 Decimal 문자열 저장. `reserve`/`release` 모두 `lock:spend:{day}` Lock(day-scope) + Python Decimal RMW. **`INCR`/`INCRBYFLOAT` 금지** — 돈은 float 불가, Decimal 직렬화만.
+- **SpendStore**: day-scope key(`spend:{day}:{currency}`)에 Decimal 문자열 저장. `reserve`/`release` 는 redis-py `transaction()`(`WATCH`/`MULTI`)이다: 키를 감시한 채 읽고 Python Decimal 로 계산한 뒤 쓰며, 그 사이 키가 바뀌었으면 통째로 다시 한다. TTL 락을 쓰지 않는 이유: 락을 쥔 인스턴스가 TTL 보다 오래 멈추면 락이 풀린 사이 다른 인스턴스가 한 예약을 뒤늦은 쓰기가 덮어쓴다. **`INCR`/`INCRBYFLOAT` 금지** — 돈은 float 불가, Decimal 직렬화만.
 - **dedup set**: `reserved:{day}` Set에 `clientOrderId` 저장으로 중복 예약 방지(멱등성). day-scoped 만으로 충분 — `clientOrderId` 가 전역적으로 고유하므로 통화를 키에 포함할 필요 없음.
 - **실행권(claim)**: `claim:{token}` 키를 `SET NX EX`(`CLAIM_TTL_SEC`)로 잡는다. 여러 인스턴스가 한 redis 를 공유해도 토큰당 실행은 하나다. TTL 은 한 번의 시도가 걸릴 수 있는 시간(SDK 타임아웃 + 유계 429 재시도)보다 길게 잡았고, 인스턴스가 실행 도중 죽었을 때만 의미가 있다.
 - **`seed` no-op**: redis counter 가 진실의 원천(AOF 지속). 감사 파일을 지워도 redis 카운터는 유지.
-- **Lock.release()**: redis-py 내부적으로 EVALSHA(Lua) 사용 → 테스트에서 `fakeredis[lua]` 서브패키지 필수(없으면 `ResponseError`). 실제 Redis 는 Lua 기본 내장.
+- **Lock.release()**(paper 락과 액세스 토큰 락이 쓴다): redis-py 내부적으로 EVALSHA(Lua) 사용 → 테스트에서 `fakeredis[lua]` 서브패키지 필수(없으면 `ResponseError`). 실제 Redis 는 Lua 기본 내장.
 
 ### RedisAuditSink (`audit.py`)
 
@@ -132,12 +133,22 @@ deny심볼 → allow심볼 → **하드실링 초과 무조건 거부**(`max-ord
 
 store I/O (`reserve`/`release`/`commit`/`seed`/`claim`) 중 `safety._STORE_ERRORS` 가 나면 → `GuardrailError("state-unavailable")`로 변환(fail-closed). `_STORE_ERRORS` 는 내장 `ConnectionError`/`TimeoutError`/`OSError` 에 redis-py 의 `RedisError` 를 더한 것이다. redis-py 의 `ConnectionError`·`TimeoutError` 는 내장 예외를 상속하지 않아서, 내장 예외만 잡으면 redis 백엔드에서는 변환이 일어나지 않는다. `GuardrailError` 자체는 절대 삼키지 않는다 — 항상 호출자에게 전파.
 
+### 액세스 토큰 공유 (`token_cache.py`)
+
+토스는 client id 당 유효한 액세스 토큰을 하나만 둔다. 새로 발급하면 이전 토큰이 죽으므로, 한 키를 쓰는 인스턴스가 각자 발급하면 서로의 토큰을 계속 무효로 만든다. redis 백엔드에서는 `server.build_client` 가 SDK 클라이언트에 `RedisTokenCache` 를 `token_cache` 로 넘겨, 한 인스턴스만 발급하고 나머지는 그 토큰을 가져다 쓴다(SDK 쪽 동작은 [pytossinvest-sdk.md](pytossinvest-sdk.md) 의 '프로세스 간 토큰 공유').
+
+- **저장**: 키 `oauth:token:{client id 해시}` 에 Fernet 으로 암호화해 넣고, 만료는 redis TTL 로 건다. 암호화 키는 client secret 에서 HKDF 로 유도한다. redis 에는 secret 이 없으므로 redis 를 읽을 수 있다는 것만으로는 토큰을 얻지 못한다. 평문으로 두면 redis 읽기 권한이 가드레일을 전부 건너뛰는 API 권한이 된다.
+- **발급 직렬화**: `lock:oauth:token:{해시}` 락을 잡고 load, 없으면 발급 후 save.
+- **폐기**: `discard(token)` 은 저장된 토큰이 그 토큰일 때만 지운다(`WATCH`). 다른 인스턴스가 이미 새 토큰으로 바꿨다면 건드리지 않는다.
+- **장애 시**: redis 오류는 전부 삼키고 '공유 없음'으로 떨어진다(각자 발급. 캐시가 없을 때와 같다). 캐시는 안전장치가 아니라서 fail-open 이다. redis-py 기본 재시도 때문에 죽은 redis 에는 호출 하나가 몇 초씩 걸리지만, 캐시를 건드리는 건 토큰을 발급·폐기할 때뿐이다.
+- **공유되지 않는 경우**: redis 가 따로인 배포끼리(예: 로컬 Docker 와 OCI)는 여전히 서로의 토큰을 죽인다. 코드로 풀 방법이 없다. SDK 가 재발급을 두 번까지 해서 버티지만, 한 키는 한 배포(한 redis)에서 쓰는 것이 맞다.
+
 ### PaperStore 심 (`paper.py` + `redis_stores.py`)
 
 `PaperBroker`는 `PaperStore` 인터페이스(`lock() → context manager`, `load() → PaperState`, `save(state)`)를 통해 상태를 읽고 쓴다. 백엔드는 `state_backend` 설정값에 따라 `server.py` 의 `_build_stores`(4-tuple 반환)에서 선택된다.
 
 **`MemoryPaperStore`** (기본, `paper.py`):
-- 인스턴스 로컬 — 재시작 시 휘발. `lock()` 은 `nullcontext`(단일 스레드 가정).
+- 인스턴스 로컬 — 재시작 시 휘발. `lock()` 은 `threading.Lock`, `load()` 는 스냅샷(아래 '한계').
 
 **`RedisPaperStore`** (`redis_stores.py`):
 - `state_backend=="redis"` 일 때 선택 — `TokenStore`/`SpendStore`와 동일한 redis client 공유.
@@ -157,9 +168,14 @@ store I/O (`reserve`/`release`/`commit`/`seed`/`claim`) 중 `safety._STORE_ERROR
 
 ### 한계 (현재 단계)
 
+- **같은 토큰 재시도가 10분 창 밖에서 전송될 수 있다.** 토큰 만료는 호출이 시작될 때만 검사한다. 그 뒤 SDK 안에서 레이트 게이트·429 백오프·토큰 재발급으로 전송이 늦어져 첫 전송 후 10분을 넘기면, 토스는 그 재시도를 새 주문으로 받는다(주문 2건, 예약 1건). 기본 TTL 120초에서는 호출 한 번이 8분 넘게 지연돼야 하고, TTL 상한 300초에서도 5분이 필요하다. 완전히 막으려면 SDK 에 전송 시한(이 시각 이후로는 보내지 않는다)이 필요하다.
+- **감사 파일의 찢어진 줄.** 디스크가 가득 차 한 줄이 중간까지만 쓰이면 줄바꿈이 없어 다음 줄이 거기에 붙고, 둘 다 파싱에서 버려진다. 그 다음 줄이 체결 불명으로 끝난 주문의 `reserved` 였다면 그날 재시작 뒤 누계에서 빠진다.
+- **버전 혼용.** spend 카운터를 TTL 락으로 쓰던 버전과 `WATCH/MULTI` 버전을 한 redis 에 같이 띄우면 구버전의 읽기-쓰기 사이에 신버전의 예약이 덮어쓰일 수 있다. 여러 인스턴스를 올릴 때는 한 번에 바꾼다.
+
+
 `MemoryPaperStore.lock()` 은 `threading.Lock` 이다(병렬 툴콜의 체결이 같은 현금을 두 번 쓰지 않게). `load()` 는 redis 스토어처럼 스냅샷을 준다: 조회는 락 없이 돌고, 도중에 실패한 체결은 저장된 상태를 건드리지 않는다. 포지션은 복사하고, 기록된 뒤 바뀌지 않는 주문은 공유한다. `RedisPaperStore` 는 분산락 `lock:paper`.
 
-transport는 `stdio`(기본, 단일 클라이언트) 또는 `http`(원격 다중 클라이언트 가능). 다중 인스턴스 redis paper 공유는 가능하나 동시 paper 충돌 시 lock 대기 시간(기본 5s)이 생길 수 있다. 다중 인스턴스 HA = `http` + `redis` 백엔드 조합.
+transport는 `stdio`(기본, 단일 클라이언트) 또는 `http`(원격 다중 클라이언트 가능). 다중 인스턴스 redis paper 공유는 가능하나 동시 paper 충돌 시 lock 대기 시간(기본 5s)이 생길 수 있다. paper 락은 TTL 락 그대로다(모의 잔고라 spend 카운터처럼 트랜잭션으로 바꾸지 않았다). 다중 인스턴스 HA = `http` + `redis` 백엔드 조합.
 
 ## 24 툴 (`server.py` 등록, `tools.py`·`conditional.py`·`market_data.py` 구현)
 
@@ -193,7 +209,7 @@ transport는 `stdio`(기본, 단일 클라이언트) 또는 `http`(원격 다중
 
 ## 모듈별 함정 (이미 겪은 것)
 
-- **툴은 워커 스레드에서 병렬로 돈다** — mcp SDK 가 sync 툴을 `anyio.to_thread` 로 실행한다. `AppContext` 하나(SDK 클라이언트·`SafetyManager`·스토어·paper)를 여러 스레드가 동시에 쓰니, 가변 상태에는 락이 필요하다. 증상은 병렬 `place_order` 가 같은 한도 잔액을 읽고 둘 다 통과하는 것(memory 스토어), 같은 토큰의 병렬 호출 중 하나가 거부되며 다른 쪽이 성공시킨 주문의 예약까지 해제하는 것. 대처는 스토어 락과 `executing(token)`. 새 상태를 추가하면 `tests/test_concurrency.py` 방식으로 겹침을 강제해 테스트한다.
+- **툴은 워커 스레드에서 병렬로 돈다** — mcp SDK 가 sync 툴을 `anyio.to_thread` 로 실행한다. `AppContext` 하나(SDK 클라이언트·`SafetyManager`·스토어·paper)를 여러 스레드가 동시에 쓰니, 가변 상태에는 락이 필요하다. 증상은 병렬 `place_order` 가 같은 한도 잔액을 읽고 둘 다 통과하는 것(memory 스토어), 같은 토큰의 병렬 호출 중 하나가 거부되며 다른 쪽이 성공시킨 주문의 예약까지 해제하는 것. 대처는 스토어 락과 `executing(token)`. 새 상태를 추가하면 `tests/test_mcp_concurrency.py` 방식으로 겹침을 강제해 테스트한다.
 - **paper modify/cancel 은 live 전용** — paper 즉시체결이라 미체결 주문 없음 → `PaperError`(실제 `409 already-filled` 미러링).
 - **paper MARKET 무가격 체결 금지** — 체결 시점 `_ref_price` 가 None 이면 가격 0 으로 조용히 체결되던 버그 → `PaperError`(토큰 살림, 재시도 가능). US 금액주문 qty=amount/price 는 Decimal 나눗셈.
 - **market_hours US 자정넘김** — 미국장 KST 표기는 23:30→06:00 처럼 wrap. `start>end` 면 `now>=start or now<end`. 깨진 시간 문자열은 "닫힘"(safe).
@@ -217,9 +233,10 @@ transport는 `stdio`(기본, 단일 클라이언트) 또는 `http`(원격 다중
 
 ## config (env `TOSSINVEST_`)
 
-`mode`·`allow_live`·`client_id`·`client_secret`·`base_url`·`account_seq`(기본 없음 = 첫 계좌. `server.build_client` 가 SDK 클라이언트의 `account_seq` 로 넘긴다)·`max_order_amount`(1,000,000 KRW)·`daily_order_limit`(5,000,000 KRW)·`max_order_amount_usd`(1,000 USD)·`daily_order_limit_usd`(5,000 USD)·`allow_symbols`/`deny_symbols`(JSON 리스트)·`enforce_market_hours`(True)·`paper_starting_cash`(**`{"KRW":"10000000"}` — 통화별 JSON dict**; 스칼라는 `{"KRW": …}` 래핑; float·bool 거부)·`confirmation_ttl_sec`(120, 상한 600: 토스가 `clientOrderId` 를 기억하는 10분을 넘겨 같은 토큰을 재시도하면 새 주문이 되는데 예약은 한 번만 센다)·`live_confirm_min_delay_sec`(0, off — live 환경 권장 5)·`audit_log_path`·**`state_backend`**(`memory`기본/`redis`)·**`redis_url`**(redis 백엔드 필수)·**`transport`**(`stdio`기본/`http`)·**`http_host`**(`127.0.0.1`)·**`http_port`**(`8000`)·**`auth_token`**(http 트랜스포트 필수). 돈 필드(`max_order_amount`·`daily_order_limit`·`max_order_amount_usd`·`daily_order_limit_usd`)는 `_no_float` validator 로 float 거부. `paper_starting_cash` 는 `_parse_starting_cash` validator 로 JSON dict·scalar·float·bool 처리(float/bool 거부). 사용자용 표는 `pytossinvest-mcp/README.md`.
+`mode`·`allow_live`·`client_id`·`client_secret`·`base_url`·`account_seq`(기본 없음 = 첫 계좌. `server.build_client` 가 SDK 클라이언트의 `account_seq` 로 넘긴다)·`max_order_amount`(1,000,000 KRW)·`daily_order_limit`(5,000,000 KRW)·`max_order_amount_usd`(1,000 USD)·`daily_order_limit_usd`(5,000 USD)·`allow_symbols`/`deny_symbols`(JSON 리스트)·`enforce_market_hours`(True)·`paper_starting_cash`(**`{"KRW":"10000000"}` — 통화별 JSON dict**; 스칼라는 `{"KRW": …}` 래핑; float·bool 거부)·`confirmation_ttl_sec`(120, 상한 300 = `MAX_CONFIRMATION_TTL_SEC`: 토스가 `clientOrderId` 를 기억하는 10분을 넘겨 같은 토큰을 재시도하면 새 주문이 되는데 예약은 한 번만 센다. 토큰 나이는 호출 시작 때 검사하고 실제 전송은 429 백오프 등으로 더 늦어질 수 있어서 창의 절반을 남긴다)·`live_confirm_min_delay_sec`(0, off — live 환경 권장 5)·`audit_log_path`·**`state_backend`**(`memory`기본/`redis`)·**`redis_url`**(redis 백엔드 필수)·**`transport`**(`stdio`기본/`http`)·**`http_host`**(`127.0.0.1`)·**`http_port`**(`8000`)·**`auth_token`**(http 트랜스포트 필수). 돈 필드(`max_order_amount`·`daily_order_limit`·`max_order_amount_usd`·`daily_order_limit_usd`)는 `_no_float` validator 로 float 거부. `paper_starting_cash` 는 `_parse_starting_cash` validator 로 JSON dict·scalar·float·bool 처리(float/bool 거부). 사용자용 표는 `pytossinvest-mcp/README.md`.
 
 ## 이력
 
+- 2026-11-12 redis spend 카운터를 TTL 락에서 `WATCH/MULTI` 로 변경. 예약을 감사로그에 선기록하고 부팅 복원이 서 있는 예약을 모두 세도록 변경. 성공 뒤 기록 실패는 `warning`. redis 백엔드에서 액세스 토큰 공유(`RedisTokenCache`) 추가 — 2026-06-19 의 보류 결정을 토큰에 한해 뒤집음(레이트리미터는 그대로 보류). `confirmation_ttl_sec` 상한을 600초에서 300초로 낮춤. paper 도 재시도 실패와 스토어 오류에서는 예약 유지.
 - 2026-11-12 병렬 툴콜 대응: `executing(token)` 실행권, memory 스토어·paper 스토어 락. 예약 해제 규칙 강화(`409 request-in-progress`, 체결 불명 뒤의 재시도 거부, 읽지 못한 200 응답은 예약 유지). 일반 정정의 감액 환급 제거(증가분만 계산). redis-py 예외도 `state-unavailable` 로 변환. `confirmation_ttl_sec` 상한 600초. `MemoryPaperStore.load()` 는 스냅샷. 그전엔 타임아웃 후 재시도가 `request-in-progress` 를 받으면 예약이 풀려, 첫 요청이 체결돼도 일일 한도에 잡히지 않았다. `TOSSINVEST_ACCOUNT_SEQ` 추가.
 - 2026-09-30 조건주문 5종을 같은 안전모델로 노출.

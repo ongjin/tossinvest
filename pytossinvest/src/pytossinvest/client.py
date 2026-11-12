@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from .auth import TokenManager
+from .auth import TokenCache, TokenManager
 from .errors import error_from_response, TossInvestError
 from .ratelimit import TokenBucket, effective_rate, backoff_wait
 
@@ -46,6 +46,12 @@ _GROUP_RATES: dict[str, float] = {
 # per client, so another process issuing a token for the same client kills ours.
 _REISSUE_TOKEN_CODES = frozenset({"expired-token", "token-revoked"})
 
+# A re-issued token can be revoked again before the retry lands when another process on the
+# same client id is issuing too, so one more round is allowed after a short random pause that
+# lets the two fall out of step.
+_MAX_TOKEN_REISSUES = 2
+_REISSUE_JITTER_SEC = 0.5
+
 # httpx drops an idle connection after 5s. Calls driven by an LLM or a person arrive further
 # apart than that, so each one paid a new TCP+TLS handshake. The two pool caps restate httpx's
 # client defaults: a bare httpx.Limits() would lift them to "unlimited".
@@ -53,9 +59,13 @@ _HTTP_LIMITS = httpx.Limits(
     max_connections=100, max_keepalive_connections=20, keepalive_expiry=60.0
 )
 
-# Values that percent-encoding cannot keep inside one path segment: "." and ".." navigate
-# the path and "" removes the segment.
+# A caller-supplied path value is refused, not encoded, when it could change which endpoint
+# is addressed. "." and ".." navigate the path and "" removes the segment. The characters
+# would restructure the path if a server or proxy decoded them again ("/", "\\", "%"), start
+# a query or fragment ("?", "#") or carry path parameters (";"): what the far side does with
+# %2F is not something the client can know.
 _UNSAFE_PATH_VALUES = frozenset({"", ".", ".."})
+_PATH_STRUCTURE_CHARS = frozenset("/\\%?#;")
 
 
 def _drop_none(params: dict) -> dict:
@@ -63,10 +73,15 @@ def _drop_none(params: dict) -> dict:
 
 
 def _path_seg(value: str) -> str:
-    """A caller-supplied id or symbol as exactly one URL path segment. "/", "?", "#" and the
-    like are percent-encoded so the value cannot reach another endpoint."""
+    """A caller-supplied id or symbol as exactly one URL path segment. Values that could
+    reach another endpoint raise ValueError; other reserved characters are percent-encoded."""
     text = str(value)
-    if text in _UNSAFE_PATH_VALUES:
+    unsafe = (
+        text in _UNSAFE_PATH_VALUES
+        or not _PATH_STRUCTURE_CHARS.isdisjoint(text)
+        or any(ch.isspace() or not ch.isprintable() for ch in text)
+    )
+    if unsafe:
         raise ValueError(f"invalid path value: {text!r}")
     return quote(text, safe="")
 
@@ -86,11 +101,14 @@ class TossInvestClient:
         retry_max_wait: float = 60.0,
         rng: Callable[[], float] = random.random,
         account_seq: int | None = None,
+        token_cache: TokenCache | None = None,
     ):
         """account_seq picks the account that account-scoped calls use; left unset, the first
-        account from get_accounts() is used. One client may be shared between threads."""
+        account from get_accounts() is used. One client may be shared between threads.
+        token_cache lets several processes on one client id share its single live token."""
         self._http = httpx.Client(base_url=base_url, timeout=timeout, limits=_HTTP_LIMITS)
-        self._token = TokenManager(client_id, client_secret, http=self._http, now=monotonic)
+        self._token = TokenManager(client_id, client_secret, http=self._http, now=monotonic,
+                                   cache=token_cache)
         self._sleep = sleep
         self._now_kst = now_kst
         self._max_retries = max_retries
@@ -178,7 +196,7 @@ class TossInvestClient:
         account: bool = False,
         params: dict | None = None,
         json: dict | None = None,
-        _retried: bool = False,
+        _reissues: int = 0,
         _attempt: int = 0,
     ) -> Any:
         if account and self._account_seq is None:
@@ -220,11 +238,18 @@ class TossInvestClient:
             body = {}
         error = error_from_response(resp.status_code, body, resp.headers)
 
-        if resp.status_code == 401 and not _retried and error.code in _REISSUE_TOKEN_CODES:
+        reissue = (
+            resp.status_code == 401
+            and _reissues < _MAX_TOKEN_REISSUES
+            and error.code in _REISSUE_TOKEN_CODES
+        )
+        if reissue:
             self._token.invalidate(token)  # a no-op if another thread already re-issued
+            if _reissues:
+                self._sleep(self._rng() * _REISSUE_JITTER_SEC)
             return self._request(
                 method, path, group=group, account=account,
-                params=params, json=json, _retried=True, _attempt=_attempt,
+                params=params, json=json, _reissues=_reissues + 1, _attempt=_attempt,
             )
 
         if resp.status_code == 429 and _attempt < self._max_retries:
@@ -239,7 +264,7 @@ class TossInvestClient:
                                      cap=self._retry_max_wait, rng=self._rng))
             return self._request(
                 method, path, group=group, account=account,
-                params=params, json=json, _retried=_retried, _attempt=_attempt + 1,
+                params=params, json=json, _reissues=_reissues, _attempt=_attempt + 1,
             )
 
         raise error

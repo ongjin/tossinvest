@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-Apache--2.0-d22128)
-![tests](https://img.shields.io/badge/tests-282%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-306%20passing-2ea44f)
 ![status](https://img.shields.io/badge/Toss%20API-available-2ea44f)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -109,7 +109,7 @@ docker compose up --build
 | `HTTP_PORT` | `8000` | 리슨 포트 |
 | `AUTH_TOKEN` | — | Bearer 토큰. **http 모드에서 필수** |
 | `STATE_BACKEND` | `memory` | `memory` · `redis` (http 모드에선 `redis` 권장) |
-| `REDIS_URL` | — | `redis://...` (STATE_BACKEND=redis 시 필요) |
+| `REDIS_URL` | — | `redis://...` (STATE_BACKEND=redis 시 필요). 같은 redis 를 쓰는 인스턴스끼리는 토스 액세스 토큰도 공유합니다(client secret 으로 암호화해 저장) |
 | `HTTP_ALLOWED_HOSTS` | `[]` | JSON 리스트. 선택적 Host 핀닝(심화 방어). 비면 DNS-rebinding 보호 off(인증은 bearer). 예 `["mcp.example.com","mcp.example.com:*"]` |
 
 > **Host 핀닝(`HTTP_ALLOWED_HOSTS`)은 선택입니다.** 기본은 DNS-rebinding 보호를 끄고 **bearer 토큰을 유일한 인증면**으로 둡니다(배포 호스트는 보통 리버스 프록시 뒤라 빌드 시점에 알 수 없음). 운영자가 자기 호스트를 알면 JSON 리스트로 핀닝해 심화 방어를 켤 수 있습니다 — 그 경우 목록에 없는 `Host` 헤더는 `421` 로 거부됩니다(`:*` 로 포트 와일드카드).
@@ -136,7 +136,7 @@ docker compose up --build
 | `ENFORCE_MARKET_HOURS` | `1` | **live 전용** 장운영시간 게이트 |
 | `LIVE_CONFIRM_MIN_DELAY_SEC` | `0` | **live 전용** preview→실행 최소 간격(초). `0`=off. 자동승인 클라이언트 방어로 `5` 권장 |
 | `PAPER_STARTING_CASH` | `{"KRW":"10000000"}` | paper 시작 현금 (**통화별 JSON dict**). 예 `{"KRW":"10000000","USD":"7000"}`. 스칼라(`10000000`)는 `{"KRW": …}` 로 래핑 |
-| `CONFIRMATION_TTL_SEC` | `120` | preview→place 토큰 유효시간(초). 최대 `600`(토스의 `clientOrderId` 멱등 유효시간) |
+| `CONFIRMATION_TTL_SEC` | `120` | preview→place 토큰 유효시간(초). 최대 `300`(토스의 `clientOrderId` 멱등 유효시간 10분의 절반) |
 | `AUDIT_LOG_PATH` | `pytossinvest-mcp-audit.log` | 감사 로그(JSONL) 경로 |
 
 > 돈 관련 필드(`MAX_ORDER_AMOUNT`·`DAILY_ORDER_LIMIT`·`MAX_ORDER_AMOUNT_USD`·`DAILY_ORDER_LIMIT_USD`)는 float 으로 주면 `TypeError` — 문자열/정수만(JSON/Decimal 안전). `PAPER_STARTING_CASH` 는 **통화별 JSON dict** 문자열(`{"KRW":"10000000","USD":"7000"}`) 또는 스칼라 정수/문자열(`10000000`, `{"KRW": …}` 로 자동 래핑). float·bool 은 거부.
@@ -206,6 +206,8 @@ place_order(confirmation_token) ────────────┘
 
 MCP 클라이언트가 툴을 **병렬로 호출해도** 한도 계산은 원자적입니다(예약은 락 아래에서, 토큰당 실행은 한 번에 하나).
 
+예약은 주문을 보내기 **전에** 감사로그에 먼저 남깁니다. 그래서 결과를 받지 못했거나 서버가 호출 도중 죽은 주문도 재시작 뒤 한도에 그대로 잡힙니다. 반대로 주문이 나간 뒤 기록에 실패하면 오류로 끝내지 않고 결과에 `warning` 을 붙여 돌려줍니다(오류로 보이면 같은 주문을 한 번 더 내게 되므로).
+
 > **일일 한도 재검사**: 일일 누적(`_spent`)은 place **성공 시점**에만 증가합니다. 그래서 `place_order` 는 `consume` 직후·실행 전에 금액 가드레일(주문당·일일)을 **다시** 검사합니다 — preview 를 여러 번 받아 모았다가 한꺼번에 place 해 한도를 넘기는 우회를 막습니다.
 >
 > **정정(modify)도 같은 토큰 게이트**: `preview_modify` 가 원주문을 조회해 정정 후 주문을 만들고 가드레일을 통과한 뒤 토큰을 발급, `modify_order(confirmation_token)` 가 실행합니다. 정정은 *기존 주문 금액의 변경*이라 일일 누적엔 증분(`new−old`)만 가산하고, 주문당·고액·하드실링 게이트는 정정 후 notional 전액에 적용됩니다.
@@ -245,7 +247,7 @@ MCP 클라이언트가 툴을 **병렬로 호출해도** 한도 계산은 원자
 ## 테스트
 
 ```bash
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests   # 282 passing
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests   # 306 passing
 ```
 
 `FakeClient` + paper 엔진으로 검증 — **라이브 키 불필요, 네트워크 0**. 무거운 로직(가드레일·토큰·paper·market_hours·audit)은 pure 모듈로 분리해 직접 단위테스트하고, `server.py` 는 모드별 **툴 등록 여부**만 검증합니다(MCP 트랜스포트 내부에 의존 안 함).

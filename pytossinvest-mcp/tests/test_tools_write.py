@@ -49,10 +49,11 @@ def test_preview_then_place_fills_paper_and_audits(app_factory):
     # token now consumed -> second place fails
     with pytest.raises(GuardrailError):
         T.place_order(app, confirmation_token=pv["confirmationToken"])
-    # audit log has preview + place lines
+    # audit log: the preview, the reservation written before the fill, then the fill
     lines = open(app.config.audit_log_path, encoding="utf-8").read().strip().splitlines()
-    tools = [json.loads(l)["tool"] for l in lines]
-    assert tools == ["preview_order", "place_order"]
+    logged = [(json.loads(l)["tool"], json.loads(l)["decision"]) for l in lines]
+    assert logged == [("preview_order", "previewed"), ("place_order", "reserved"),
+                      ("place_order", "placed")]
 
 
 def test_place_live_calls_client_with_string_price(app_factory, fake_client):
@@ -446,5 +447,200 @@ def test_unreadable_success_response_keeps_reservation(app_factory, fake_client)
 
     _place_600k_failing_with(
         app, fake_client, TossInvestError("missing-result", "", http_status=200))
+
+    assert _fresh_600k_fits(app) is False
+
+
+def _audit_failing_on(app, decision):
+    """Make the audit log fail for one kind of event, as a full disk or a redis blip would."""
+    record = app.audit.record
+
+    def failing(event):
+        if event.get("decision") == decision:
+            raise OSError("No space left on device")
+        record(event)
+    app.audit.record = failing
+
+
+def _preview_600k(app):
+    return T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                           quantity="6", price="100000")["confirmationToken"]
+
+
+def test_order_is_not_sent_when_its_reservation_cannot_be_logged(app_factory, fake_client):
+    # the log line written before sending is what a restart restores the reservation from
+    app = _live_cap_app(app_factory)
+    token = _preview_600k(app)
+    _audit_failing_on(app, "reserved")
+
+    with pytest.raises(GuardrailError, match="state-unavailable"):
+        T.place_order(app, confirmation_token=token)
+
+    assert fake_client.place_payloads == []
+    assert _fresh_600k_fits(app) is True  # nothing was sent, so nothing stays counted
+
+
+def test_a_placed_order_is_returned_even_if_recording_it_fails(app_factory, fake_client):
+    # raising here would tell the caller the order failed; its natural answer is a new
+    # preview and a second real order
+    app = _live_cap_app(app_factory)
+    token = _preview_600k(app)
+    _audit_failing_on(app, "placed")
+
+    result = T.place_order(app, confirmation_token=token)
+
+    assert result["orderId"] == "real-1"
+    assert "No space left on device" in result["warning"]
+    assert _fresh_600k_fits(app) is False  # still counted
+
+
+def test_a_placed_order_is_returned_even_if_the_token_cannot_be_cleared(app_factory, fake_client):
+    app = _live_cap_app(app_factory)
+    token = _preview_600k(app)
+
+    def unreachable(token):
+        raise ConnectionError("store is down")
+    app.safety.token_store.delete = unreachable
+
+    result = T.place_order(app, confirmation_token=token)
+
+    assert result["orderId"] == "real-1"
+    assert "warning" in result
+    assert len(fake_client.place_payloads) == 1
+
+
+def test_a_modified_order_is_returned_even_if_recording_it_fails(app_factory, fake_client):
+    app = app_factory(mode="live", allow_live=True, enforce_market_hours=False)
+    pv = T.preview_modify(app, "real-1", order_type="LIMIT", price="71000")
+    _audit_failing_on(app, "modified")
+
+    result = T.modify_order(app, confirmation_token=pv["confirmationToken"])
+
+    assert result["orderId"] == "real-2"
+    assert "warning" in result
+
+
+def test_the_broker_error_is_what_surfaces_when_logging_it_fails(app_factory, fake_client):
+    from pytossinvest.errors import BusinessRuleError
+    app = _live_cap_app(app_factory)
+    token = _preview_600k(app)
+    _audit_failing_on(app, "error")
+
+    def reject(**kwargs):
+        raise BusinessRuleError("insufficient-buying-power", "", http_status=422)
+    fake_client.place_order = reject
+
+    with pytest.raises(BusinessRuleError):
+        T.place_order(app, confirmation_token=token)
+
+
+class _ProcessDied(BaseException):
+    """Stands in for the server being killed while a call is in flight."""
+
+
+@pytest.mark.parametrize("outcome", ["unknown", "died"])
+def test_a_restart_restores_a_reservation_that_never_settled(app_factory, fake_client, outcome):
+    from datetime import datetime, timezone
+    from pytossinvest.errors import ServerError
+    from pytossinvest_mcp.audit import AuditLog
+
+    def app_on_the_same_audit_log():
+        app = _live_cap_app(app_factory)
+        app.audit = AuditLog(app.config.audit_log_path,
+                             now=lambda: datetime(2026, 6, 17, 1, 0, tzinfo=timezone.utc))
+        return app
+
+    app = app_on_the_same_audit_log()
+    token = _preview_600k(app)
+
+    def fail(**kwargs):
+        if outcome == "died":
+            raise _ProcessDied()
+        raise ServerError("internal-error", "", http_status=503)  # may have filled
+    fake_client.place_order = fail
+    with pytest.raises((ServerError, _ProcessDied)):
+        T.place_order(app, confirmation_token=token)
+
+    restarted = app_on_the_same_audit_log()  # memory stores start empty
+    restarted.safety.restore_spend(restarted.audit.read_events())
+
+    assert _fresh_600k_fits(restarted) is False
+
+
+def test_paper_retry_that_fails_keeps_the_reservation_of_a_fill_that_happened(app_factory, fake_client):
+    # the fill went through but the token could not be cleared, so the same token is retried;
+    # a failure of that retry says nothing about the fill
+    app = app_factory(mode="paper", daily_order_limit="1000000")
+    pv = T.preview_order(app, symbol="005930", side="BUY", order_type="MARKET", quantity="6")
+    delete = app.safety.token_store.delete
+
+    def unreachable(token):
+        raise ConnectionError("store is down")
+    app.safety.token_store.delete = unreachable
+    first = T.place_order(app, confirmation_token=pv["confirmationToken"])
+    assert first["status"] == "FILLED" and "warning" in first
+    app.safety.token_store.delete = delete
+
+    fake_client.get_prices = lambda symbols: []  # no reference price for the MARKET retry
+    with pytest.raises(PaperError):
+        T.place_order(app, confirmation_token=pv["confirmationToken"])
+
+    from datetime import date
+    assert app.safety.spend_store.current(date(2026, 6, 17).isoformat(), "KRW") == Decimal("420000")
+
+
+def test_paper_fill_interrupted_by_a_store_failure_keeps_its_reservation(app_factory):
+    # with the paper state in redis the fill may have been saved before the failure
+    app = app_factory(mode="paper", daily_order_limit="1000000")
+    pv = T.preview_order(app, symbol="005930", side="BUY", order_type="LIMIT",
+                         quantity="6", price="100000")
+
+    def saved_then_lost_connection(**kwargs):
+        raise ConnectionError("redis went away after the write")
+    app.paper.place = saved_then_lost_connection
+
+    with pytest.raises(ConnectionError):
+        T.place_order(app, confirmation_token=pv["confirmationToken"])
+
+    assert _fresh_600k_fits(app) is False
+
+
+def test_the_broker_error_surfaces_when_the_reservation_cannot_be_released(app_factory, fake_client):
+    from pytossinvest.errors import BusinessRuleError
+    app = _live_cap_app(app_factory)
+    token = _preview_600k(app)
+
+    def reject(**kwargs):
+        raise BusinessRuleError("insufficient-buying-power", "", http_status=422)
+    fake_client.place_order = reject
+
+    def unreachable(*args, **kwargs):
+        raise ConnectionError("store is down")
+    app.safety.spend_store.release = unreachable
+
+    with pytest.raises(BusinessRuleError):
+        T.place_order(app, confirmation_token=token)
+
+    lines = open(app.config.audit_log_path, encoding="utf-8").read().strip().splitlines()
+    last = json.loads(lines[-1])
+    assert (last["decision"], last["reservation"]) == ("error", "kept")
+
+
+def test_retry_whose_reservation_cannot_be_logged_keeps_the_earlier_reservation(
+        app_factory, fake_client):
+    # the first attempt may have filled; failing to log the retry must not release it
+    from pytossinvest.errors import ServerError
+    app = _live_cap_app(app_factory)
+    token = _preview_600k(app)
+
+    def unknown(**kwargs):
+        raise ServerError("internal-error", "", http_status=503)
+    fake_client.place_order = unknown
+    with pytest.raises(ServerError):
+        T.place_order(app, confirmation_token=token)
+
+    _audit_failing_on(app, "reserved")
+    with pytest.raises(GuardrailError, match="state-unavailable"):
+        T.place_order(app, confirmation_token=token)
 
     assert _fresh_600k_fits(app) is False

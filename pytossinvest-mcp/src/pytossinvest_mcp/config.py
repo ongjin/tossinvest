@@ -8,6 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 IDEMPOTENCY_WINDOW_SEC = 600  # how long the broker remembers a clientOrderId
+# A same-token retry sent after that window is a second order that the reservation dedup
+# counts only once. The token's age is checked when a call starts, and the send itself can
+# be held up after that (rate-limit backoff), so half the window is left for it.
+MAX_CONFIRMATION_TTL_SEC = IDEMPOTENCY_WINDOW_SEC // 2
 
 
 class Settings(BaseSettings):
@@ -39,9 +43,8 @@ class Settings(BaseSettings):
     # paper engine (per-currency cash buckets; scalar is wrapped as {"KRW": ...})
     paper_starting_cash: dict[str, Decimal] = {"KRW": Decimal("10000000")}
 
-    # preview -> confirm window. Capped at the broker's clientOrderId idempotency window: a
-    # same-token retry after that would be a second order the reservation counts only once.
-    confirmation_ttl_sec: int = Field(default=120, le=IDEMPOTENCY_WINDOW_SEC)
+    # preview -> confirm window
+    confirmation_ttl_sec: int = Field(default=120, le=MAX_CONFIRMATION_TTL_SEC)
     # live-only: minimum seconds between preview and place (0 = off). 권장 live+수동 5.
     live_confirm_min_delay_sec: int = 0
 

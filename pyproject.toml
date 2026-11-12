@@ -1,2 +1,8 @@
 [tool.uv.workspace]
 members = ["pytossinvest", "pytossinvest-mcp"]
+
+# `uv run pytest` from the repo root runs both suites in one session. Test modules are
+# imported by basename, so a file name must not repeat between the two tests/ dirs.
+[tool.pytest.ini_options]
+testpaths = ["pytossinvest/tests", "pytossinvest-mcp/tests"]
+addopts = "-q"

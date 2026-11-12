@@ -348,12 +348,25 @@ def run_server(settings: Settings, mcp) -> None:
         mcp.run()  # stdio transport (default) for MCP clients like Claude Desktop
 
 
+def _token_cache(settings: Settings):
+    """Instances behind one redis share the broker's single live access token. Without that
+    each would issue its own and revoke the others' on every call."""
+    if settings.state_backend != "redis":
+        return None
+    from .token_cache import RedisTokenCache
+
+    return RedisTokenCache(
+        _redis_from_url(settings.redis_url),
+        client_id=settings.client_id, client_secret=settings.client_secret,
+    )
+
+
 def build_client(settings: Settings):
     from pytossinvest import TossInvestClient
 
     return TossInvestClient(
         settings.client_id, settings.client_secret, base_url=settings.base_url,
-        account_seq=settings.account_seq,
+        account_seq=settings.account_seq, token_cache=_token_cache(settings),
     )
 
 

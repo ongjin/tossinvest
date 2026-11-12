@@ -239,12 +239,14 @@ def test_200_missing_result_raises_missing_result():
 def test_200_deeply_nested_json_raises_invalid_response():
     from pytossinvest.errors import TossInvestError
     _token_route()
-    deep = b"[" * 50000 + b"]" * 50000  # exceeds recursion limit during json parse
+    deep = b"[" * 50000 + b"]" * 50000
     respx.get(f"{BASE}/api/v1/prices").mock(return_value=httpx.Response(200, content=deep))
     c = _client()
     with pytest.raises(TossInvestError) as exc:
         c._request("GET", "/api/v1/prices", group="MARKET_DATA", params={"symbols": "005930"})
-    assert exc.value.code == "invalid-response"
+    # Python 3.12's json parser gives up (RecursionError); 3.14 parses it into a non-object.
+    # Either way it must be a typed error, never a crash.
+    assert exc.value.code in {"invalid-response", "missing-result"}
 
 
 @respx.mock
@@ -377,3 +379,51 @@ def test_gate_wait_is_bounded_by_retry_max_wait():
     c._gate("MARKET_DATA")
 
     assert 0 < sum(clock.slept) <= 60.0
+
+
+def _revoked():
+    return httpx.Response(401, json={"error": {"code": "token-revoked", "message": ""}})
+
+
+@respx.mock
+def test_recovers_when_the_reissued_token_is_revoked_again():
+    # a second process on the same client id can issue between our re-issue and our retry
+    token_route = _token_route()
+    route = respx.get(f"{BASE}/api/v1/prices").mock(side_effect=[
+        _revoked(), _revoked(), httpx.Response(200, json={"result": []})])
+    slept = []
+    c = TossInvestClient("cid", "secret", base_url=BASE, sleep=slept.append, rng=lambda: 0.5)
+
+    assert c._request("GET", "/api/v1/prices", group="MARKET_DATA") == []
+
+    assert route.call_count == 3
+    assert token_route.call_count == 3
+    assert slept == [0.25]  # one jittered pause, before the second re-issue only
+
+
+@respx.mock
+def test_token_reissue_is_bounded():
+    from pytossinvest.errors import AuthError
+    _token_route()
+    route = respx.get(f"{BASE}/api/v1/prices").mock(return_value=_revoked())
+    c = _client()
+
+    with pytest.raises(AuthError):
+        c._request("GET", "/api/v1/prices", group="MARKET_DATA")
+
+    assert route.call_count == 3  # the first send and two re-issues
+
+
+@respx.mock
+def test_clients_sharing_a_token_cache_issue_one_token():
+    from test_auth import SharedCache
+    token_route = _token_route()
+    respx.get(f"{BASE}/api/v1/prices").mock(return_value=httpx.Response(200, json={"result": []}))
+    cache = SharedCache()
+    first = TossInvestClient("cid", "secret", base_url=BASE, sleep=lambda s: None, token_cache=cache)
+    second = TossInvestClient("cid", "secret", base_url=BASE, sleep=lambda s: None, token_cache=cache)
+
+    first._request("GET", "/api/v1/prices", group="MARKET_DATA")
+    second._request("GET", "/api/v1/prices", group="MARKET_DATA")
+
+    assert token_route.call_count == 1
