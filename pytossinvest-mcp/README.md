@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-Apache--2.0-d22128)
-![tests](https://img.shields.io/badge/tests-179%20passing-2ea44f)
+![tests](https://img.shields.io/badge/tests-282%20passing-2ea44f)
 ![status](https://img.shields.io/badge/Toss%20API-available-2ea44f)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -126,6 +126,7 @@ docker compose up --build
 | `ALLOW_LIVE` | `0` | `live` 시작에 필수(이중 게이트). `1` 이어야 함 |
 | `CLIENT_ID` / `CLIENT_SECRET` | — | 토스 Open API 자격증명 |
 | `BASE_URL` | `https://openapi.tossinvest.com` | API 엔드포인트 |
+| `ACCOUNT_SEQ` | (없음) | 계좌가 둘 이상일 때 조회·주문에 쓸 계좌. `get_accounts` 가 보여 주는 `accountSeq` 값. 비워 두면 첫 계좌 |
 | `MAX_ORDER_AMOUNT` | `1000000` | 주문당 상한 (**KRW 심볼**, 숫자 코드) |
 | `DAILY_ORDER_LIMIT` | `5000000` | 일일 누적 상한 (**KRW 심볼**) |
 | `MAX_ORDER_AMOUNT_USD` | `1000` | 주문당 상한 (**USD 심볼**, 영문 티커) |
@@ -135,7 +136,7 @@ docker compose up --build
 | `ENFORCE_MARKET_HOURS` | `1` | **live 전용** 장운영시간 게이트 |
 | `LIVE_CONFIRM_MIN_DELAY_SEC` | `0` | **live 전용** preview→실행 최소 간격(초). `0`=off. 자동승인 클라이언트 방어로 `5` 권장 |
 | `PAPER_STARTING_CASH` | `{"KRW":"10000000"}` | paper 시작 현금 (**통화별 JSON dict**). 예 `{"KRW":"10000000","USD":"7000"}`. 스칼라(`10000000`)는 `{"KRW": …}` 로 래핑 |
-| `CONFIRMATION_TTL_SEC` | `120` | preview→place 토큰 유효시간(초) |
+| `CONFIRMATION_TTL_SEC` | `120` | preview→place 토큰 유효시간(초). 최대 `600`(토스의 `clientOrderId` 멱등 유효시간) |
 | `AUDIT_LOG_PATH` | `pytossinvest-mcp-audit.log` | 감사 로그(JSONL) 경로 |
 
 > 돈 관련 필드(`MAX_ORDER_AMOUNT`·`DAILY_ORDER_LIMIT`·`MAX_ORDER_AMOUNT_USD`·`DAILY_ORDER_LIMIT_USD`)는 float 으로 주면 `TypeError` — 문자열/정수만(JSON/Decimal 안전). `PAPER_STARTING_CASH` 는 **통화별 JSON dict** 문자열(`{"KRW":"10000000","USD":"7000"}`) 또는 스칼라 정수/문자열(`10000000`, `{"KRW": …}` 로 자동 래핑). float·bool 은 거부.
@@ -192,6 +193,7 @@ docker compose up --build
 preview_order(...) ──guardrails 통과──▶ confirmationToken (TTL 120s)
                                             │
 place_order(confirmation_token) ────────────┘
+   │  토큰 실행권 확보  ← 같은 토큰의 호출이 겹치면 confirmation-in-progress 로 거부
    │  consume(token)   ← 존재·만료 검증 (pop 안 함)
    │  실행 (paper 체결 / 실주문)
    │  성공 시에만 finalize(token)  ← pop + 일일누적 기록
@@ -199,6 +201,10 @@ place_order(confirmation_token) ────────────┘
 ```
 
 **멱등성의 핵심**: 토큰은 **성공했을 때만** 소비됩니다. 그래서 `place_order` 가 도중에 실패하면 토큰이 살아있어 **같은 `clientOrderId` 로 안전하게 재시도** — 두 번 체결되지 않습니다. 성공하면 토큰이 사라져 2차 발사도 불가능합니다.
+
+**실패했을 때 일일 한도 예약**은 체결이 확실히 안 된 경우에만 풀립니다(paper 의 실패, live 첫 시도의 4xx 거부). 타임아웃·5xx·`409 request-in-progress` 처럼 결과를 모르면 예약을 남겨 두고, 그 뒤의 재시도가 거부돼도 풀지 않습니다. 재시도가 성공하면 한 번만 셉니다. 정정은 늘어난 금액만 한도에 더합니다. 주문을 줄이거나 취소해도 그날 한도는 돌려받지 않습니다.
+
+MCP 클라이언트가 툴을 **병렬로 호출해도** 한도 계산은 원자적입니다(예약은 락 아래에서, 토큰당 실행은 한 번에 하나).
 
 > **일일 한도 재검사**: 일일 누적(`_spent`)은 place **성공 시점**에만 증가합니다. 그래서 `place_order` 는 `consume` 직후·실행 전에 금액 가드레일(주문당·일일)을 **다시** 검사합니다 — preview 를 여러 번 받아 모았다가 한꺼번에 place 해 한도를 넘기는 우회를 막습니다.
 >
@@ -239,7 +245,7 @@ place_order(confirmation_token) ────────────┘
 ## 테스트
 
 ```bash
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests   # 179 passing
+uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests   # 282 passing
 ```
 
 `FakeClient` + paper 엔진으로 검증 — **라이브 키 불필요, 네트워크 0**. 무거운 로직(가드레일·토큰·paper·market_hours·audit)은 pure 모듈로 분리해 직접 단위테스트하고, `server.py` 는 모드별 **툴 등록 여부**만 검증합니다(MCP 트랜스포트 내부에 의존 안 함).
