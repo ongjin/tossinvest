@@ -18,7 +18,7 @@ MCP 서버를 띄우는 방법은 두 가지다. 소스에서 빌드하는 로�
 | `deploy/server-update.sh` | 서버에서 도는 부분. `remote.sh` 가 넘겨 실행하며 직접 부르지 않는다 |
 | `deploy/remote.env` | 배포 대상. gitignore 돼 있다. 형식은 `deploy/remote.env.example`. `DEPLOY_*` 설정만 들어간다 |
 
-이미지 태그는 고정한 버전에서 나온다. `pytossinvest-mcp` 0.0.3 과 `pytossinvest-sdk` 0.0.4 면 `pypi-mcp0.0.3-sdk0.0.4` 다.
+이미지 태그에는 MCP와 SDK의 고정 버전이 들어간다. MCP 0.0.4와 SDK 0.0.5의 태그는 `pypi-mcp0.0.4-sdk0.0.5`다.
 
 대상은 환경변수가 먼저고, 환경변수에 없는 것만 `remote.env` 에서 채운다. 어디로 무엇이 나갈지는 아무것도 건드리지 않는 명령으로 미리 볼 수 있다.
 

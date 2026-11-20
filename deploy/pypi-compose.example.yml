@@ -3,7 +3,7 @@
 # replaces only the tag on the image line below.
 services:
   tossinvest-mcp:
-    image: tossinvest-mcp:pypi-mcp0.0.3-sdk0.0.4
+    image: tossinvest-mcp:pypi-mcp0.0.4-sdk0.0.5
     build:
       context: ./pypi
       dockerfile: Dockerfile

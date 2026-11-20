@@ -1,4 +1,4 @@
-pytossinvest-sdk==0.0.4
-pytossinvest-mcp[http]==0.0.3
+pytossinvest-sdk==0.0.5
+pytossinvest-mcp[http]==0.0.4
 mcp==2.2.0
 uvicorn==0.49.0

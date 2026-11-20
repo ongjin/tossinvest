@@ -369,12 +369,12 @@ python-dotenv==1.2.4 \
 python-multipart==0.0.33 \
     --hash=sha256:8f16c07b36add9da6b2ee87d3efcaf0a45a6de9c3d0a5dd94e9ccf7675a7bc45 \
     --hash=sha256:b8112424a6abd162ec08d390565dd113ad699f2fe6fef3c987b8bbcbfe9e390d
-pytossinvest-mcp==0.0.3 \
-    --hash=sha256:cc697b8af4ebf75c52c21367332b9e64f3f5462a3675ecbb302c4bad7395078f \
-    --hash=sha256:d558e9d665a54a75d151a7e1dd7fc66255f58d2111404565918a5df2ef339453
-pytossinvest-sdk==0.0.4 \
-    --hash=sha256:8e102fedc5e678b17287d25c9cc7a3fd1be3611626a528f87497b5fe00bbedb8 \
-    --hash=sha256:c352a0e3a29c07e60466d1d263b8fc2462684209146e6ef43be828d3ea64b952
+pytossinvest-mcp==0.0.4 \
+    --hash=sha256:0bbeab615890a490aaeaf0a826c7cef0417e14b8b55dbadbc77cfe4a6563413e \
+    --hash=sha256:634af4f1ecc17d2c90b180271a53c1756baad826fe1102b2d14f449ae46b4759
+pytossinvest-sdk==0.0.5 \
+    --hash=sha256:57ba858f599bfc2e61528255ff0678e4a9b39782a3c150af5a11ba75e13b0058 \
+    --hash=sha256:979534f74852a7c4c037edf7965bcda3db8e02c2007d13da8decb23f87410935
 pywin32==312 ; sys_platform == 'win32' \
     --hash=sha256:02ebca0f0242b75292e218065004310d6a477407c09fa449bfe4f6022bc0c0fc \
     --hash=sha256:17948aeadbdb091f0ced6ef0841620794e68327b94ee415571c1203594b7215c \
