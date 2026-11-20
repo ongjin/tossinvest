@@ -139,7 +139,7 @@ def _register_reads(mcp: MCPServer, app: AppContext) -> None:
 
     @mcp_tool(name="get_holdings",
               description="Current holdings/positions. Money & quantities are strings. "
-                          "Does not include cash; use get_buying_power for that.")
+                          "Filter positions by symbol. Use get_buying_power for available cash.")
     def get_holdings(symbol: "str | None" = None) -> dict:
         return T.get_holdings(app, symbol)
 
@@ -238,8 +238,9 @@ def _register_writes(mcp: MCPServer, app: AppContext) -> None:
     mcp_tool = _model_facing_tool(mcp)
 
     @mcp_tool(name="get_order_readiness",
-              description="Buying power, sellable quantity, and commissions before ordering.")
-    def get_order_readiness(symbol: str, side: Side = "BUY", currency: Currency = "KRW") -> dict:
+              description="Buying power, sellable quantity, and commissions before ordering. "
+                          "Omit currency to use the stock's trading currency.")
+    def get_order_readiness(symbol: str, side: Side = "BUY", currency: Currency | None = None) -> dict:
         return T.get_order_readiness(app, symbol, side, currency)
 
     @mcp_tool(name="preview_order",

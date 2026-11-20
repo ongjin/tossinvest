@@ -38,3 +38,18 @@ def test_paper_place_parity(app_factory, backend):
     assert res["status"] == "FILLED"
     h = T.get_holdings(app)
     assert h["items"][0]["quantity"] == "1"
+
+
+def test_paper_read_filters(app_factory, backend):
+    app = app_factory(mode="paper", backend=backend)
+    for symbol in ("005930", "000660"):
+        preview = T.preview_order(app, symbol=symbol, side="BUY", order_type="LIMIT",
+                                  quantity="1", price="70000")
+        T.place_order(app, confirmation_token=preview["confirmationToken"])
+
+    assert [p["symbol"] for p in T.get_holdings(app, "005930")["items"]] == ["005930"]
+    assert not T.get_holdings(app, "NO_POSITION")["items"]
+    assert not T.list_orders(app)["orders"]
+    assert len(T.list_orders(app, status="CLOSED")["orders"]) == 2
+    closed = T.list_orders(app, status="CLOSED", symbol="000660")
+    assert [(o["symbol"], o["status"]) for o in closed["orders"]] == [("000660", "FILLED")]

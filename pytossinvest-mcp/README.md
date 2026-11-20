@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-Apache--2.0-d22128)
-![tests](https://img.shields.io/badge/tests-310%20passing-2ea44f)
+[![CI](https://github.com/ongjin/tossinvest/actions/workflows/ci.yml/badge.svg)](https://github.com/ongjin/tossinvest/actions/workflows/ci.yml)
 ![status](https://img.shields.io/badge/Toss%20API-available-2ea44f)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -143,7 +143,7 @@ docker compose up --build
 
 > 돈 관련 필드(`MAX_ORDER_AMOUNT`·`DAILY_ORDER_LIMIT`·`MAX_ORDER_AMOUNT_USD`·`DAILY_ORDER_LIMIT_USD`)는 float 으로 주면 `TypeError` — 문자열/정수만(JSON/Decimal 안전). `PAPER_STARTING_CASH` 는 **통화별 JSON dict** 문자열(`{"KRW":"10000000","USD":"7000"}`) 또는 스칼라 정수/문자열(`10000000`, `{"KRW": …}` 로 자동 래핑). float·bool 은 거부.
 >
-> **통화 판정**: 시세 응답의 통화로 한도·임계를 고릅니다. 시세 조회가 실패하면 심볼 모양으로 판정 — 숫자로 시작하면 KRW(예 `005930`·`0101N0`), 그 외는 USD(예 `AAPL`·`BRK.B`)라 모르는 심볼은 작은 USD 한도에 걸립니다(FX 환산 없음 — 안전 한도가 환율/네트워크에 의존하지 않게).
+> **통화 판정**: 시세 응답의 통화를 대문자로 정규화합니다. KRW·USD에 한도가 있으며, 다른 통화의 주문은 `unsupported-currency`로 거부합니다. 시세 조회가 실패하면 심볼 모양으로 판정 — 숫자로 시작하면 KRW(예 `005930`·`0101N0`), 그 외는 USD(예 `AAPL`·`BRK.B`)라 모르는 심볼은 작은 USD 한도에 걸립니다(FX 환산 없음 — 안전 한도가 환율/네트워크에 의존하지 않게).
 
 ---
 
@@ -156,7 +156,7 @@ docker compose up --build
 | 툴 | 시그니처 | 설명 |
 |---|---|---|
 | `get_accounts` | `()` | 계좌 목록. paper 면 합성 `PAPER` 계좌 반환 |
-| `get_holdings` | `(symbol=None)` | 보유 포지션. paper 면 현금·실현손익·종목. **paper `cash`/`realizedPnl` 은 `{통화: 문자열}` dict(KRW/USD 분리), 종목 항목엔 `currency` 포함** |
+| `get_holdings` | `(symbol=None)` | `symbol`을 지정하면 해당 종목의 포지션만 반환합니다. paper 면 현금·실현손익·종목. **paper `cash`/`realizedPnl` 은 `{통화: 문자열}` dict(KRW/USD 분리), 종목 항목엔 `currency` 포함** |
 | `get_buying_power` | `(currency=None)` | 현금 매수가능금액(미수 제외). 통화 생략 시 KRW·USD 둘 다. `read_only` 에서도 현금을 보는 경로. 총 예수금은 토스 API 에 없음 |
 | `get_quote` | `(symbols: list)` | 최신가(최대 200종목). **단일 종목이면 호가+체결도 동봉** |
 | `get_candles` | `(symbol, interval, count=100, before=None)` | OHLC 캔들. `interval` 은 `'1m'` 또는 `'1d'` |
@@ -166,7 +166,7 @@ docker compose up --build
 | `get_rankings` | `(type, market_country, duration='1d', exclude_investment_caution=False, count=20)` | 거래대금·거래량·상승·하락·토스 거래 순위. 기본 20개(API 기본 100은 컨텍스트가 커서) |
 | `get_market_indicators` | `(symbols)` | 코스피·코스닥(포인트)과 국채 2·3·5·10·20·30년 금리(%) 현재값 |
 | `get_indicator_history` | `(symbol, view, interval, count=None, before=None, until=None)` | `view=candles` 지표 캔들(1m·1d, `before`), `view=investor_trading` 코스피·코스닥 투자자별 매매대금(1d·1w·1mo·1y, `until`). 다른 view 의 커서를 넣으면 거부 |
-| `list_orders` | `(status='OPEN', symbol=None, cursor=None)` | `OPEN`(미체결, 한 번에 전부) 또는 `CLOSED`(체결·취소, 페이지 단위 — 응답의 `nextCursor` 를 `cursor` 로 넘김). paper 는 시뮬 주문 |
+| `list_orders` | `(status='OPEN', symbol=None, cursor=None)` | `OPEN`(미체결, 한 번에 전부) 또는 `CLOSED`(체결·취소, 페이지 단위 — 응답의 `nextCursor` 를 `cursor` 로 넘김). paper는 즉시체결이므로 `OPEN`은 빈 목록, `CLOSED`는 해당하는 체결 전체를 한 번에 반환합니다. |
 | `get_order` | `(order_id)` | 주문 상세 |
 | `list_conditional_orders` | `(status='OPEN', symbol=None, cursor=None)` | 조건주문 목록(`OPEN`=감시·주문중, `CLOSED`=완료·만료, 페이지 단위). 앱에서 만든 것도 포함. paper 는 빈 목록 |
 | `get_conditional_order` | `(conditional_order_id)` | 조건주문 상세(조건별 상태, 발동돼 생긴 주문 id) |
@@ -177,7 +177,7 @@ docker compose up --build
 
 | 툴 | 시그니처 | 설명 |
 |---|---|---|
-| `get_order_readiness` | `(symbol, side='BUY', currency='KRW')` | 주문 전 매수여력·매도가능수량·수수료 |
+| `get_order_readiness` | `(symbol, side='BUY', currency=None)` | 주문 전 매수여력·매도가능수량·수수료. 통화를 지정하면 그 통화를 쓰고, 생략하면 시세의 통화를 씁니다. 시세가 없거나 키 없는 paper에서는 종목 코드로 판정합니다. |
 | `preview_order` | `(symbol, side, order_type, quantity=None, price=None, order_amount=None, time_in_force='DAY', confirm_high_value_order=False)` | **STEP 1/2.** 가드레일 검사 + 비용 추정 → `confirmationToken`. 주문 안 함 |
 | `place_order` | `(confirmation_token)` | **STEP 2/2.** 토큰으로 체결. consume 직후·실행 전 일일 한도 재검사. 멱등(실패하면 같은 토큰 재시도 가능) |
 | `preview_modify` | `(order_id, order_type, price=None, quantity=None, confirm_high_value_order=False)` | **정정 STEP 1/2** (**live 전용**). 원주문 조회 → 정정 후 notional 로 가드레일 검사 → `confirmationToken`. 정정 안 함 |
@@ -197,9 +197,10 @@ preview_order(...) ──guardrails 통과──▶ confirmationToken (TTL 120s)
 place_order(confirmation_token) ────────────┘
    │  토큰 실행권 확보  ← 같은 토큰의 호출이 겹치면 confirmation-in-progress 로 거부
    │  consume(token)   ← 존재·만료 검증 (pop 안 함)
+   │  가드레일 검사 → 일일 한도 예약 → 감사로그에 reserved 기록
    │  실행 (paper 체결 / 실주문)
-   │  성공 시에만 finalize(token)  ← pop + 일일누적 기록
-   └─ 실패 시 finalize 안 함  ← 토큰 살아있음 → 같은 clientOrderId 로 멱등 재시도
+   │  성공 시 commit → 토큰 소비
+   └─ 실패 시 토큰 유지. 첫 시도의 확정 거절만 예약 해제
 ```
 
 **멱등성의 핵심**: 토큰은 **성공했을 때만** 소비됩니다. 그래서 `place_order` 가 도중에 실패하면 토큰이 살아있어 **같은 `clientOrderId` 로 안전하게 재시도** — 두 번 체결되지 않습니다. 성공하면 토큰이 사라져 2차 발사도 불가능합니다.
@@ -212,9 +213,9 @@ MCP 클라이언트가 툴을 **병렬로 호출해도** 한도 계산은 원자
 
 예약은 주문을 보내기 **전에** 감사로그에 먼저 남깁니다. 그래서 결과를 받지 못했거나 서버가 호출 도중 죽은 주문도 재시작 뒤 한도에 그대로 잡힙니다. 반대로 주문이 나간 뒤 기록에 실패하면 오류로 끝내지 않고 결과에 `warning` 을 붙여 돌려줍니다(오류로 보이면 같은 주문을 한 번 더 내게 되므로).
 
-> **일일 한도 재검사**: 일일 누적(`_spent`)은 place **성공 시점**에만 증가합니다. 그래서 `place_order` 는 `consume` 직후·실행 전에 금액 가드레일(주문당·일일)을 **다시** 검사합니다 — preview 를 여러 번 받아 모았다가 한꺼번에 place 해 한도를 넘기는 우회를 막습니다.
+> **일일 한도 재검사.** `place_order`는 실행 전에 금액을 예약하면서 일일 누적을 원자적으로 검사합니다. 동시에 여러 토큰을 실행해도 먼저 잡힌 예약이 한도에 반영됩니다.
 >
-> **정정(modify)도 같은 토큰 게이트**: `preview_modify` 가 원주문을 조회해 정정 후 주문을 만들고 가드레일을 통과한 뒤 토큰을 발급, `modify_order(confirmation_token)` 가 실행합니다. 정정은 *기존 주문 금액의 변경*이라 일일 누적엔 증분(`new−old`)만 가산하고, 주문당·고액·하드실링 게이트는 정정 후 notional 전액에 적용됩니다.
+> **정정(modify)도 같은 토큰 게이트**: `preview_modify` 가 원주문을 조회해 정정 후 주문을 만들고 가드레일을 통과한 뒤 토큰을 발급, `modify_order(confirmation_token)` 가 실행합니다. 정정은 *기존 주문 금액의 변경*이라 일일 누적엔 증가분(`max(0, new−old)`)만 가산하고, 주문당·고액·하드실링 게이트는 정정 후 notional 전액에 적용됩니다.
 
 > notional(주문금액) 계산 우선순위: `order_amount` → `price × quantity` → `ref_price × quantity`(MARKET 추정가). 셋 다 불가능하면 `insufficient-order-params`, `order_amount` 를 `price`/`quantity` 와 **함께** 주면 `invalid-order-params` 로 거부합니다. `quantity`·`price`·`order_amount` 가 **0 이하면** `invalid-order-value`(음수 notional 이 상한을 통과하던 구멍 차단).
 
@@ -243,7 +244,7 @@ MCP 클라이언트가 툴을 **병렬로 호출해도** 한도 계산은 원자
 - **paper 현금은 통화별 버킷(KRW/USD 분리, FX 환산 없음)** — `place` 는 `spec.currency` 로 해당 버킷만 차감/입금합니다. 없는 통화로 BUY 시 `PaperError`. `PAPER_STARTING_CASH` 는 통화별 JSON dict(`{"KRW":"10000000","USD":"7000"}`)로 각 버킷을 초기화하며, 스칼라(`10000000`)는 KRW 버킷으로 자동 래핑됩니다. `get_holdings`(paper)의 `cash`·`realizedPnl` 은 `{"KRW": "...", "USD": "..."}` 형태의 통화별 dict 로 반환됩니다.
 - **paper modify/cancel 은 live 전용** — paper 는 즉시체결 모델이라 정정/취소할 미체결 주문이 없습니다. paper 에선 `preview_modify`·`cancel_order` 가 `PaperError` 로 명확히 거부(실제 `409 already-filled` 미러링).
 - **paper MARKET 무가격 체결 금지** — 체결 시점에 참조가(ref price)가 비면 가격 0 으로 조용히 체결되던 버그를 막았습니다. ref price 없으면 `PaperError`(토큰 살려둠 → 재시도 가능). US 금액주문은 `qty = order_amount / fill_price`(Decimal 나눗셈).
-- **장운영시간 US 자정넘김** — 미국장을 KST 로 표기하면 23:30→06:00 처럼 자정을 넘깁니다. `start > end` 면 wrap 윈도우(`now >= start or now < end`)로 처리. 깨진 시간 문자열은 "닫힘"으로 안전 처리. 종목 코드가 영문자면 `US`, 아니면 `KR` 로 캘린더 조회.
+- **장운영시간 US 자정넘김** — 미국장을 KST 로 표기하면 23:30→06:00 처럼 자정을 넘깁니다. `start > end` 면 wrap 윈도우(`now >= start or now < end`)로 처리. 깨진 시간 문자열은 "닫힘"으로 안전 처리. 주문 통화가 USD면 미국, KRW면 한국 캘린더를 조회합니다.
 - **감사 로그** — 모든 write 결정(`previewed`/`placed`/`modify_previewed`/`modified`/`canceled`/`error`)을 `AUDIT_LOG_PATH` 에 **JSONL(append-only)** 로 기록합니다(UTC 타임스탬프). 신뢰·디버그·기록 용도. `placed`·`modified` 레코드엔 `notional`·`currency` 가 들어가 **재시작 시 일일 누적 복원(replay)** 에 쓰이고(`modified` 는 delta 기록), `modify_previewed`·`canceled` 엔 **정정/취소 전 원주문 상태**가 남습니다.
 
 ---
@@ -251,7 +252,7 @@ MCP 클라이언트가 툴을 **병렬로 호출해도** 한도 계산은 원자
 ## 테스트
 
 ```bash
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests   # 310 passing
+uv run --package pytossinvest-mcp --extra dev pytest pytossinvest-mcp/tests
 ```
 
 `FakeClient` + paper 엔진으로 검증 — **라이브 키 불필요, 네트워크 0**. 무거운 로직(가드레일·토큰·paper·market_hours·audit)은 pure 모듈로 분리해 직접 단위테스트하고, `server.py` 는 모드별 **툴 등록 여부**만 검증합니다(MCP 트랜스포트 내부에 의존 안 함).

@@ -91,7 +91,7 @@ def get_accounts(app: AppContext) -> dict:
 
 def get_holdings(app: AppContext, symbol: str | None = None) -> dict:
     if app.use_paper:
-        return app.paper.holdings()
+        return app.paper.holdings(symbol)
     return app.client.get_holdings(symbol)
 
 
@@ -113,6 +113,8 @@ def get_buying_power(app: AppContext, currency: str | None = None) -> dict:
 def list_orders(app: AppContext, status: str = "OPEN", symbol: str | None = None,
                 cursor: str | None = None) -> dict:
     if app.use_paper:
+        if status == "OPEN":  # the paper broker fills every order immediately
+            return {"orders": [], "hasNext": False}
         items = [_paper_order_dict(o) for o in app.paper.list_orders()
                  if symbol is None or o.symbol == symbol]
         return {"orders": items, "hasNext": False}
@@ -234,12 +236,7 @@ def _settle_success(app: AppContext, confirmation_token: str, result: dict, even
 
 def _country_for_order(symbol: str, currency: "str | None") -> str:
     """Market country for the hours gate. Authoritative currency wins; else symbol shape."""
-    cur = (currency or "").strip().upper()
-    if cur == "USD":
-        return "US"
-    if cur == "KRW":
-        return "KR"
-    return "US" if order_currency(symbol) == "USD" else "KR"
+    return "US" if order_currency(symbol, currency) == "USD" else "KR"
 
 
 def _market_gate(app: AppContext, symbol: str,
@@ -273,9 +270,14 @@ def _price_and_currency(app: AppContext, symbol: str) -> "tuple[str | None, str 
 
 
 def get_order_readiness(app: AppContext, symbol: str, side: str = "BUY",
-                        currency: str = "KRW") -> dict:
+                        currency: str | None = None) -> dict:
+    offline_paper = app.use_paper and not (app.config.client_id and app.config.client_secret)
+    if currency is None and not offline_paper:
+        _, currency = _price_and_currency(app, symbol)
+    currency = order_currency(symbol, currency)
     if app.use_paper:
         return {
+            "currency": currency,
             "buyingPower": str(app.paper.buying_power(currency)),
             "sellableQuantity": str(app.paper.sellable_quantity(symbol)),
             "commissions": [],

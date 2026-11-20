@@ -165,7 +165,7 @@ class PaperBroker:
     def list_orders(self) -> list[PaperOrder]:
         return list(self._store.load().orders)
 
-    def holdings(self) -> dict:
+    def holdings(self, symbol: str | None = None) -> dict:
         state = self._store.load()
         return {
             "cash": {cur: str(amt) for cur, amt in state.cash.items()},
@@ -173,6 +173,6 @@ class PaperBroker:
             "items": [
                 {"symbol": s, "currency": p.currency, "quantity": str(p.quantity),
                  "averagePurchasePrice": str(p.avg_price)}
-                for s, p in state.positions.items()
+                for s, p in state.positions.items() if symbol is None or s == symbol
             ],
         }

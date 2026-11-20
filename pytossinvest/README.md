@@ -4,7 +4,7 @@
 
 ![python](https://img.shields.io/badge/python-3.12+-3776ab)
 ![license](https://img.shields.io/badge/license-MIT-3da639)
-![tests](https://img.shields.io/badge/tests-155%20passing-2ea44f)
+[![CI](https://github.com/ongjin/tossinvest/actions/workflows/ci.yml/badge.svg)](https://github.com/ongjin/tossinvest/actions/workflows/ci.yml)
 ![status](https://img.shields.io/badge/Toss%20API-available-2ea44f)
 ![unofficial](https://img.shields.io/badge/unofficial-%E2%9A%A0-9e9e9e)
 
@@ -20,12 +20,12 @@
 
 | | |
 |---|---|
-| 💸 **돈은 절대 float 가 아니다** | 금액·수량 전구간 문자열/`Decimal`. `float` 은 들어오는 순간 `TypeError` — 부동소수 반올림으로 1원도 안 틀어집니다. |
-| 🚦 **클라이언트단 레이트리미터** | 17개 그룹별 토큰버킷이 요청 속도를 조절. **09:00–09:10 KST 개장 동시호가 10분간 ORDER/ORDER_INFO 반토막**(6→3) 반영. |
+| 💸 **돈은 절대 float 가 아니다** | 금액·수량 전구간 문자열/`Decimal`. 주문 요청의 가격과 수량에 `float`이나 `bool`을 넣으면 HTTP 호출 전에 `TypeError`가 발생합니다. |
+| 🚦 **클라이언트단 레이트리미터** | 그룹별 토큰버킷이 요청 속도를 조절. **09:00–09:10 KST 개장 동시호가 10분간 ORDER/ORDER_INFO 반토막**(6→3) 반영. |
 | 🔁 **멱등성** | `clientOrderId` 로 중복주문 방지 — 네트워크 단절로 응답을 못 받아도 같은 키로 재시도하면 두 번 체결되지 않음(서버측 ~10분 유효). |
 | 🧩 **에러는 `code` 로 분기** | `message` 가 비어도 OK. 서버가 **모르는 code/enum 을 추가해도 안 깨짐**(관용적 파싱). |
-| 🔐 **토큰 생애주기** | 만료 30초 전까지 메모리 캐싱·자동 갱신(`expires_in` 이 30초 이하라도 과거 시각으로 뭉개지지 않게 `max(0, …)` 클램프), `401 expired-token`·`token-revoked`(같은 키로 다른 프로세스가 토큰을 받으면 이전 토큰 무효) 시 1회 재발급 후 재시도. |
-| ✅ **라이브 키 없이 그린** | `pytest` → **155개 테스트** 통과(respx mock, 네트워크 0). 기여 장벽 0. |
+| 🔐 **토큰 생애주기** | 만료 30초 전까지 메모리 캐싱·자동 갱신(`expires_in` 이 30초 이하라도 과거 시각으로 뭉개지지 않게 `max(0, …)` 클램프), `401 expired-token`·`token-revoked`(같은 키로 다른 프로세스가 토큰을 받으면 이전 토큰 무효) 시 최대 두 번 재발급 후 재시도. |
+| ✅ **라이브 키 없이 그린** | HTTP 요청은 respx로, 실시간 구독은 로컬 WebSocket 서버로 테스트합니다. |
 
 ---
 
@@ -56,19 +56,13 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 
     # 2) 시세 — 계좌 컨텍스트 불필요
     prices = c.get_prices(["005930"])
-    print(prices[0].last_price)          # Decimal("70000") — 절대 float 아님
-
-    # 3) 주문 — 문자열-decimal + 멱등(clientOrderId 직접 부여)
-    resp = c.place_order(
-        symbol="005930", side="BUY", order_type="LIMIT",
-        price="70000", quantity="10", client_order_id="my-001",
-    )
-    print(resp.order_id)
+    for price in prices:
+        print(price.symbol, price.last_price)
 ```
 
 `with` 블록을 벗어나면 내부 `httpx.Client` 가 닫힙니다(`c.close()` 수동 호출도 가능).
 
-> **돈/수량은 무조건 문자열로 넣고 `Decimal` 로 받습니다.** `price=70000.0` 처럼 float 을 넣으면 `TypeError`. 의도된 안전장치입니다.
+주문·정정의 가격, 수량, 금액에는 양의 유한한 십진 문자열, `Decimal`, 정수를 사용할 수 있습니다. SDK는 이를 JSON 문자열로 전송합니다. 조건주문의 감시가와 주문가에도 같은 규칙이 적용됩니다. 주문 흐름은 키 없이 [paper 데모](https://github.com/ongjin/tossinvest/tree/main/examples)에서 실행할 수 있습니다.
 
 ---
 
@@ -158,7 +152,7 @@ TossInvestClient(
 place_order(*, symbol, side, order_type,
             quantity=None, price=None, order_amount=None,
             time_in_force="DAY", client_order_id=None,
-            confirm_high_value_order=False) -> OrderResponse
+            confirm_high_value_order=False, send_within=None) -> OrderResponse
 
 modify_order(order_id, *, order_type,
              price=None, quantity=None,
@@ -172,7 +166,7 @@ cancel_order(order_id) -> dict
 ```python
 create_conditional_order(*, symbol, type, quantity, order_type, expire_date,
                          first, second=None, client_order_id=None,
-                         confirm_high_value_order=False) -> dict   # type: SINGLE | OCO | OTO
+                         confirm_high_value_order=False, send_within=None) -> dict   # type: SINGLE | OCO | OTO
 
 modify_conditional_order(conditional_order_id, *, type, quantity, order_type,
                          expire_date, first, second=None,
@@ -303,7 +297,7 @@ c.place_order(..., client_order_id="my-001", send_within=540)  # 지금부터 9�
 ## 테스트
 
 ```bash
-uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # 155 passing
+uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests
 ```
 
 `respx` 로 httpx 를 mock 합니다 — **라이브 키 불필요, 네트워크 0**. `git clone && uv sync && pytest` 면 그린.

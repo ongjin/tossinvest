@@ -2,7 +2,7 @@
 
 이 파일은 두 부분으로 나뉩니다:
   1) 돈/Decimal 안전계약 — 네트워크·키 0 으로 항상 실행 (SDK 의 핵심 차별점).
-  2) 실 API 사용 예시 — 환경변수에 키가 있을 때만 실행 (없으면 안전하게 스킵).
+  2) 계좌·시세 조회 예시 — 환경변수에 키가 있을 때만 실행 (없으면 안전하게 스킵).
 
 실행:
     uv run --package pytossinvest-sdk python examples/sdk_quickstart.py
@@ -19,8 +19,6 @@ from decimal import Decimal
 
 from pytossinvest import (
     TossInvestClient,
-    BusinessRuleError,
-    RateLimitError,
     to_decimal,
     decimal_to_str,
 )
@@ -43,7 +41,7 @@ def demo_money_is_never_float() -> None:
 
 
 def demo_real_usage() -> None:
-    """키가 있을 때만 — 실 API 호출 모양과 에러 분기."""
+    """키가 있을 때만 — 계좌와 시세를 조회합니다."""
     print("── 2) 실 API 사용 (키 있을 때만) ──")
     client_id = os.environ.get("TOSSINVEST_CLIENT_ID")
     client_secret = os.environ.get("TOSSINVEST_CLIENT_SECRET")
@@ -59,21 +57,11 @@ def demo_real_usage() -> None:
 
         # 시세 — 계좌 컨텍스트 불필요. last_price 는 Decimal (절대 float 아님)
         prices = c.get_prices(["005930"])
-        print("  005930 last_price:", repr(prices[0].last_price))
+        if prices:
+            print("  005930 last_price:", repr(prices[0].last_price))
+        else:
+            print("  005930 시세가 없습니다.")
 
-        # 주문 — 돈/수량은 문자열, clientOrderId 로 멱등성 직접 부여
-        try:
-            resp = c.place_order(
-                symbol="005930", side="BUY", order_type="LIMIT",
-                price="70000", quantity="1", client_order_id="quickstart-001",
-            )
-            print("  placed order_id:", resp.order_id)
-        except RateLimitError:
-            # SDK 가 max_retries 만큼 자동 재시도 후 소진 시 raise
-            print("  rate limited — 잠시 후 재시도하세요")
-        except BusinessRuleError as e:
-            # message 가 비어도 code 로 분기 (서버가 모르는 code 추가해도 안 깨짐)
-            print("  거부됨:", e.code)
     print()
 
 

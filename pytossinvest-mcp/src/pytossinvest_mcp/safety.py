@@ -23,9 +23,13 @@ HIGH_VALUE_THRESHOLD_USD = Decimal("100000")   # $100k: requires explicit confir
 MAX_ORDER_THRESHOLD_USD = Decimal("3000000")   # $3M: always rejected
 
 
-def order_currency(symbol: str) -> str:
-    """Fallback order currency by symbol shape (no FX): KR codes start with a digit, anything
-    else is USD so an unrecognized symbol lands in the USD caps, never the larger KRW numbers."""
+def order_currency(symbol: str, currency: str | None = None) -> str:
+    """Use the quote currency when supplied, otherwise infer it from the symbol."""
+    code = (currency or "").strip().upper()
+    if code in ("KRW", "USD"):
+        return code
+    if code:
+        raise GuardrailError("unsupported-currency", f"no order limits configured for {code}")
     first = symbol[:1]
     return "KRW" if first.isascii() and first.isdigit() else "USD"
 
@@ -174,7 +178,7 @@ class SafetyManager:
             symbol=symbol, side=side, order_type=order_type, quantity=quantity,
             price=price, order_amount=order_amount, time_in_force=time_in_force,
             confirm_high_value_order=confirm_high_value_order, notional=notional,
-            client_order_id=self._gen_id(), currency=currency if currency is not None else order_currency(symbol),
+            client_order_id=self._gen_id(), currency=order_currency(symbol, currency),
             modify_order_id=modify_order_id,
         )
 
@@ -187,7 +191,7 @@ class SafetyManager:
             quantity=request["quantity"], price=None, order_amount=None, time_in_force="DAY",
             confirm_high_value_order=confirm_high_value_order, notional=notional,
             client_order_id=self._gen_id(),
-            currency=currency if currency is not None else order_currency(symbol),
+            currency=order_currency(symbol, currency),
             modify_order_id=modify_id, kind=CONDITIONAL_KIND, conditional=request,
         )
 
@@ -223,11 +227,13 @@ class SafetyManager:
             hard_ceiling = MAX_ORDER_THRESHOLD_USD
             per_order_cap = to_decimal(cfg.max_order_amount_usd)
             daily_cap = to_decimal(cfg.daily_order_limit_usd)
-        else:
+        elif spec.currency == "KRW":
             high_value = HIGH_VALUE_THRESHOLD
             hard_ceiling = MAX_ORDER_THRESHOLD
             per_order_cap = to_decimal(cfg.max_order_amount)
             daily_cap = to_decimal(cfg.daily_order_limit)
+        else:
+            raise GuardrailError("unsupported-currency", f"no order limits configured for {spec.currency}")
         self.check_symbol(spec.symbol)
         if spec.notional > hard_ceiling:
             raise GuardrailError(

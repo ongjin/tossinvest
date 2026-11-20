@@ -325,3 +325,17 @@ def test_build_spec_rejects_unparseable_numbers(field, bad):
     with pytest.raises(GuardrailError) as e:
         m.build_spec(symbol="005930", side="BUY", order_type="LIMIT", **kw)
     assert e.value.code == "invalid-order-value"
+
+
+def test_quote_currency_normalized_or_rejected():
+    assert order_currency("005930", " usd ") == "USD"
+    with pytest.raises(GuardrailError, match="unsupported-currency"):
+        order_currency("005930", "EUR")
+
+
+def test_guardrails_reject_old_unrecognized_currency():
+    mgr = _mgr()
+    spec = _spec(mgr)
+    spec.currency = "EUR"  # a token persisted before currency validation
+    with pytest.raises(GuardrailError, match="unsupported-currency"):
+        _ok(mgr, spec)

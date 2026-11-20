@@ -5,6 +5,7 @@ import random
 import threading
 import time as _time
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Callable
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -13,6 +14,7 @@ import httpx
 
 from .auth import TokenCache, TokenManager
 from .errors import error_from_response, SendDeadlineError, TossInvestError
+from .money import decimal_to_str, to_decimal
 from .ratelimit import TokenBucket, effective_rate, backoff_wait
 
 __all__ = ["TossInvestClient"]
@@ -66,6 +68,25 @@ _HTTP_LIMITS = httpx.Limits(
 # %2F is not something the client can know.
 _UNSAFE_PATH_VALUES = frozenset({"", ".", ".."})
 _PATH_STRUCTURE_CHARS = frozenset("/\\%?#;")
+
+
+_OrderValue = str | Decimal | int
+
+
+def _order_value(value: _OrderValue) -> str:
+    number = to_decimal(value)
+    if number <= 0:
+        raise ValueError("order prices, quantities and amounts must be positive")
+    return value if isinstance(value, str) else decimal_to_str(number)
+
+
+def _order_leg(leg: dict) -> dict:
+    result = leg.copy()
+    if "triggerPrice" in leg:
+        result["triggerPrice"] = _order_value(leg["triggerPrice"])
+    if leg.get("orderPrice") is not None:
+        result["orderPrice"] = _order_value(leg["orderPrice"])
+    return result
 
 
 def _drop_none(params: dict) -> dict:
@@ -426,8 +447,8 @@ class TossInvestClient:
 
     # --- order write ---
     def place_order(self, *, symbol: str, side: str, order_type: str,
-                    quantity: str | None = None, price: str | None = None,
-                    order_amount: str | None = None, time_in_force: str = "DAY",
+                    quantity: _OrderValue | None = None, price: _OrderValue | None = None,
+                    order_amount: _OrderValue | None = None, time_in_force: str = "DAY",
                     client_order_id: str | None = None,
                     confirm_high_value_order: bool = False,
                     send_within: float | None = None) -> "OrderResponse":
@@ -437,24 +458,24 @@ class TossInvestClient:
         payload: dict = {"symbol": symbol, "side": side, "orderType": order_type,
                          "timeInForce": time_in_force, "confirmHighValueOrder": confirm_high_value_order}
         if quantity is not None:
-            payload["quantity"] = quantity
+            payload["quantity"] = _order_value(quantity)
         if price is not None:
-            payload["price"] = price
+            payload["price"] = _order_value(price)
         if order_amount is not None:
-            payload["orderAmount"] = order_amount
+            payload["orderAmount"] = _order_value(order_amount)
         if client_order_id is not None:
             payload["clientOrderId"] = client_order_id
         result = self._request("POST", "/api/v1/orders", group="ORDER", account=True,
                                json=payload, send_within=send_within)
         return OrderResponse.model_validate(result)
 
-    def modify_order(self, order_id: str, *, order_type: str, price: str | None = None,
-                     quantity: str | None = None, confirm_high_value_order: bool = False) -> dict:
+    def modify_order(self, order_id: str, *, order_type: str, price: _OrderValue | None = None,
+                     quantity: _OrderValue | None = None, confirm_high_value_order: bool = False) -> dict:
         payload: dict = {"orderType": order_type, "confirmHighValueOrder": confirm_high_value_order}
         if price is not None:
-            payload["price"] = price
+            payload["price"] = _order_value(price)
         if quantity is not None:
-            payload["quantity"] = quantity
+            payload["quantity"] = _order_value(quantity)
         return self._request("POST", f"/api/v1/orders/{_path_seg(order_id)}/modify", group="ORDER", account=True, json=payload)
 
     def cancel_order(self, order_id: str) -> dict:
@@ -463,16 +484,16 @@ class TossInvestClient:
     # --- conditional orders ---
     # first/second use the wire shape {"orderSide", "triggerPrice", "orderPrice"?} with string prices.
     @staticmethod
-    def _conditional_payload(type: str, quantity: str, order_type: str, expire_date: str,
+    def _conditional_payload(type: str, quantity: _OrderValue, order_type: str, expire_date: str,
                              first: dict, second: dict | None, confirm_high_value_order: bool) -> dict:
-        payload: dict = {"type": type, "quantity": quantity, "orderType": order_type,
-                         "expireDate": expire_date, "first": first,
+        payload: dict = {"type": type, "quantity": _order_value(quantity), "orderType": order_type,
+                         "expireDate": expire_date, "first": _order_leg(first),
                          "confirmHighValueOrder": confirm_high_value_order}
         if second is not None:
-            payload["second"] = second
+            payload["second"] = _order_leg(second)
         return payload
 
-    def create_conditional_order(self, *, symbol: str, type: str, quantity: str, order_type: str,
+    def create_conditional_order(self, *, symbol: str, type: str, quantity: _OrderValue, order_type: str,
                                  expire_date: str, first: dict, second: dict | None = None,
                                  client_order_id: str | None = None,
                                  confirm_high_value_order: bool = False,
@@ -487,7 +508,7 @@ class TossInvestClient:
         return self._request("POST", "/api/v1/conditional-orders", group="CONDITIONAL_ORDER",
                              account=True, json=payload, send_within=send_within)
 
-    def modify_conditional_order(self, conditional_order_id: str, *, type: str, quantity: str,
+    def modify_conditional_order(self, conditional_order_id: str, *, type: str, quantity: _OrderValue,
                                  order_type: str, expire_date: str, first: dict,
                                  second: dict | None = None,
                                  confirm_high_value_order: bool = False) -> dict:

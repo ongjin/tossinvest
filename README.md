@@ -36,12 +36,12 @@ decimal·레이트리밋·멱등성까지 제대로 다룬 **SDK** + LLM 에게 
 
 | | |
 |---|---|
-| 💸 **돈은 절대 float 가 아니다** | 금액·수량 전구간 문자열/`Decimal`. float 은 들어오는 순간 `TypeError` — 반올림으로 1원도 안 틀어집니다. |
+| 💸 **돈은 절대 float 가 아니다** | 금액·수량 전구간 문자열/`Decimal`. SDK는 주문 요청을 만들 때 `float`와 `bool`을 거부하고 가격과 수량을 문자열로 보냅니다. |
 | 🚦 **클라이언트단 레이트리미터** | 그룹별 토큰버킷 + **9시 개장 10분 ORDER/ORDER_INFO 반토막**(6→3) 반영. **`X-RateLimit-*` 헤더로 버킷 동기화**(헤더가 진실) + **429 bounded 자동 retry**(`Retry-After`/백오프+jitter, 5xx·타임아웃은 비재시도). |
-| 🔁 **멱등성** | `clientOrderId` 자동 관리 — 네트워크 단절로 응답을 못 받아도 같은 키로 재시도해 **중복주문 방지**. |
+| 🔁 **멱등성** | SDK로 주문할 때는 호출자가 주문마다 `client_order_id`를 부여합니다. MCP는 미리보기에서 생성한 ID를 같은 토큰의 재시도에 재사용합니다. 토스의 중복 방지 창은 10분입니다. |
 | 🧩 **에러는 `code` 로 분기** | `message` 가 비어도 OK. 서버가 **모르는 코드/enum 을 추가해도 안 깨짐**. |
-| 🔐 **토큰 생애주기** | 만료 전 갱신·메모리 캐싱, `401 expired-token` 시 1회 재발급 후 재시도. |
-| ✅ **라이브 키 없이 그린** | `git clone` 뒤 `uv run --all-packages --all-extras pytest` → **465개 테스트** 통과. 기여 장벽 0. |
+| 🔐 **토큰 생애주기** | 만료 전 갱신·메모리 캐싱, `401 expired-token` 또는 `token-revoked` 응답 시 최대 두 번 재발급합니다. |
+| ✅ **라이브 키 없이 그린** | `git clone` 뒤 `uv run --all-packages --all-extras pytest` 로 SDK·MCP·빠른 시작 예제를 함께 테스트합니다. |
 
 ---
 
@@ -77,12 +77,11 @@ from pytossinvest import TossInvestClient
 with TossInvestClient(client_id="...", client_secret="...") as c:
     c.get_accounts()                     # accountSeq 자동 캐싱 (ACCOUNT 1/s)
     prices = c.get_prices(["005930"])
-    print(prices[0].last_price)          # Decimal("70000") — 절대 float 아님
-
-    # 주문은 문자열-decimal + 멱등(clientOrderId 직접 부여)
-    c.place_order(symbol="005930", side="BUY", order_type="LIMIT",
-                  price="70000", quantity="10", client_order_id="my-001")
+    for price in prices:
+        print(price.symbol, price.last_price)
 ```
+
+주문 흐름은 키 없이 실행하는 [paper 데모](examples/README.md)에서 확인할 수 있습니다.
 
 ### MCP — Claude Desktop 에 꽂기
 
@@ -141,9 +140,9 @@ with TossInvestClient(client_id="...", client_secret="...") as c:
 
 ```bash
 # 테스트 — 라이브 키 불필요
-uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # 155 passing
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # 310 passing
-uv run --all-packages --all-extras pytest                                 # 둘 다 한 번에 (루트)
+uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests
+uv run --package pytossinvest-mcp --extra dev pytest pytossinvest-mcp/tests
+uv run --all-packages --all-extras pytest                                 # SDK·MCP·예제 (루트)
 ```
 
 더 깊은 문서는 [`docs/wiki/`](docs/wiki/) — [API 레퍼런스](docs/wiki/tossinvest-open-api.md) · [SDK 내부구조](docs/wiki/pytossinvest-sdk.md) · [MCP 안전모델](docs/wiki/pytossinvest-mcp.md).

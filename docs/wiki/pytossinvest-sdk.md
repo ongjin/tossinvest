@@ -95,7 +95,7 @@ SDK 는 프로토콜만 정의한다. 구현은 `pytossinvest-mcp` 의 `RedisTok
 
 ## 모듈별 핵심 + 함정
 
-- **`money.py`**: `to_decimal(str|int|Decimal)→Decimal`. **`bool`·`float` 은 `TypeError`** (float 진입 경로 자체를 안 만듦). `NaN`·`Infinity` 는 파싱 불가 문자열과 똑같이 `decimal.InvalidOperation`(음수는 허용, 실현손실 등). `decimal_to_str` = `format(v, "f")`(지수표기 방지). 돈/수량은 무조건 이걸 통과.
+- **`money.py`**: `to_decimal(str|int|Decimal)→Decimal`. **`bool`·`float` 은 `TypeError`** (float 진입 경로 자체를 안 만듦). `NaN`·`Infinity` 는 파싱 불가 문자열과 똑같이 `decimal.InvalidOperation`(음수는 허용, 실현손실 등). `decimal_to_str` = `format(v, "f")`(지수표기 방지). 일반·조건 주문의 등록·정정은 계좌 조회나 인증 전에 주문값이 유한한 양수인지 검사한다. 조건주문은 두 조건의 감시가·주문가도 검사한다. 십진 문자열은 그대로, 정수·`Decimal`은 십진 문자열로 전송한다.
 - **`models.py`**: `Money = Annotated[Decimal, BeforeValidator(to_decimal)]` — pydantic 이 문자열→Decimal 강제하고 float 거부. `_Base` 는 `populate_by_name=True, extra="ignore"`(서버가 필드 추가해도 안 깨짐). 모델: `Account`(account_no/account_seq/account_type)·`Price`(last_price:Money)·`BuyingPower`(cash_buying_power:Money)·`OrderResponse`(order_id/client_order_id?)·`HoldingsItem`.
 - **`errors.py`**: `error_from_response` 가 **status→예외클래스** 매핑(400 Validation·401 Auth·403 Forbidden·404 NotFound·409 Conflict·422 BusinessRule·429 RateLimit). **모르는 status 는 ≥500 → ServerError, 그 외 → base `TossInvestError`**(안 깨짐). `code` 는 항상 문자열이고 기본값 `"unknown"`(문자열이 아닌 값이 오면 `"unknown"` — 호출자가 `code in {...}` 로 분기하므로). 본문이 표준 모양이 아니어도(JSON 문자열·배열, `error` 가 문자열인 게이트웨이 응답) status 로 고른 클래스에 `code="unknown"` 으로 떨어지고 `AttributeError` 를 내지 않는다. 토큰 엔드포인트만 `oauth_error_from_response`(OAuth2 포맷). `RateLimitError.retry_after` 는 429 의 `Retry-After` 헤더에서만 파싱.
 - **`ratelimit.py`**: `TokenBucket(capacity, refill_per_sec, now)` — `try_acquire(n=1)`/`time_until_available(n=1)`. `effective_rate(group, base, now_kst)` 가 `PEAK_GROUPS={ORDER, ORDER_INFO}` 를 09:00–09:10 KST 동안 반토막. **v0.0.2 구현**: `backoff_wait(attempt, retry_after, *, base=1.0, cap, rng)` 헬퍼(`Retry-After>0` 이면 그대로, 아니면 지수백오프+full jitter, `cap` 상한); `_sync_bucket_from_headers(group, headers)` 가 `X-RateLimit-Limit`→capacity, `1/X-RateLimit-Reset`→refill_per_sec, `min(_tokens, X-RateLimit-Remaining)`→_tokens 로 버킷 동기화, 헤더 없거나 파싱 불가면 no-op. 토큰을 영영 내주지 못할 값(비유한, `Limit<1`, 음수)도 무시한다(받아들이면 게이트가 무한 루프나 0 나눗셈에 빠진다). 재충전 주기는 `retry_max_wait` 로 잘라서, 게이트 대기가 그보다 길어질 상황이면 그냥 보내고 유계인 429 재시도 경로에 맡긴다; 그룹별 `_rate_from_header` 플래그 — 헤더를 한 번 받은 그룹은 `_gate` 에서 피크반토막 미적용(헤더가 진실).
@@ -111,6 +111,8 @@ SDK 는 프로토콜만 정의한다. 구현은 `pytossinvest-mcp` 의 `RedisTok
 6. 이 문서 + (외부 스펙 변경이면) [tossinvest-open-api.md](tossinvest-open-api.md) 갱신.
 
 ## 이력
+
+- 2026-11-20 SDK 주문·정정 입력에 금액 검증을 적용하고 빠른 시작 예제를 계좌·시세 조회로 제한했다.
 
 - 2026-11-12 전송 시한 `send_within` 과 `SendDeadlineError` 추가(0.0.4).
 - 2026-11-12 경로 값을 인코딩에서 거부로 변경(`/ \ % ? # ;`·공백·제어문자). 토큰 재발급 재시도를 1회에서 2회로, `TokenCache` seam 추가(`token_cache=`).
