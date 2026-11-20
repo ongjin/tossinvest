@@ -4,7 +4,7 @@ import pytossinvest_mcp
 
 
 def test_version_exposed():
-    assert pytossinvest_mcp.__version__ == "0.0.3"
+    assert pytossinvest_mcp.__version__ == "0.0.4"
 
 
 def test_mcpserver_harness_works():

@@ -603,7 +603,7 @@ wheels = [
 
 [[package]]
 name = "pytossinvest-mcp"
-version = "0.0.3"
+version = "0.0.4"
 source = { editable = "pytossinvest-mcp" }
 dependencies = [
     { name = "mcp" },
@@ -639,7 +639,7 @@ provides-extras = ["dev", "redis", "http"]
 
 [[package]]
 name = "pytossinvest-sdk"
-version = "0.0.4"
+version = "0.0.5"
 source = { editable = "pytossinvest" }
 dependencies = [
     { name = "httpx" },

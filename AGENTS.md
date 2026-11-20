@@ -44,8 +44,8 @@ toss/
 uv sync --package pytossinvest-mcp --extra dev
 
 # 테스트
-uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # SDK (155) — respx mock + 로컬 websockets 서버
-uv run --package pytossinvest-mcp pytest pytossinvest-mcp/tests           # MCP (310) — FakeClient
+uv run --package pytossinvest-sdk --extra dev pytest pytossinvest/tests   # SDK — respx mock + 로컬 websockets 서버
+uv run --package pytossinvest-mcp --extra dev pytest pytossinvest-mcp/tests           # MCP — FakeClient
 uv run --all-packages --all-extras pytest                                 # 두 스위트를 루트에서 한 번에
 
 # MCP 서버 실행 (stdio — Claude Desktop/Cursor 등 MCP 클라이언트용)
@@ -55,7 +55,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 
 ## Conventions
 
-- **money/quantity**: 전부 문자열/Decimal. float 진입 경로 자체를 안 만든다. (위 CRITICAL RULES)
+- **money/quantity**: SDK는 일반·조건 주문과 정정의 가격·수량·금액을 HTTP 호출 전에 검증하고 JSON 문자열로 보낸다. MCP 입출력은 문자열이다.
 - **SDK 규약** (`pytossinvest`): 응답 `result` 자동 언래핑(토큰 엔드포인트 제외)·**`code` 기반 에러 분기**(unknown code 관용)·**`X-RateLimit-*` 헤더가 진실**(표 숫자 하드코딩 금지)·`accountSeq` 1회 캐싱(ACCOUNT 1/s — 계좌헤더가 필요한 첫 호출이 알아서 `get_accounts()` 로 채움. 2026-09-30 전엔 `RuntimeError` 로 먼저 부르라고 강제했는데, mcp 2.1+ 에선 그 안내가 모델에 가려져 계좌 툴이 막혔다)·**`clientOrderId` 멱등성 수동**(10분). v0.0.2: `X-RateLimit-*` 헤더로 버킷 동적 동기화(헤더가 진실 — 본 그룹은 피크반토막 미적용), 429 **bounded 자동 retry**(`Retry-After` 또는 지수백오프+jitter, `max_retries` 기본 3, `retry_max_wait` 60s 상한) 구현. **5xx·타임아웃은 비재시도**(호출자 책임). 소진 시 종전대로 `RateLimitError` throw. **401 은 `expired-token`·`token-revoked` 일 때 토큰을 버리고 최대 2회 재발급**(둘째 전에 짧은 jitter), `token_cache` 로 프로세스 간 토큰 공유 가능 — 토스는 client 당 유효 토큰이 1개라 같은 키로 다른 프로세스(예: 로컬 Docker 와 OCI)가 발급하면 우리 토큰이 revoke 된다(2026-09-30 전엔 `expired-token` 만 재시도해 캐시 만료까지 401 이 이어질 수 있었다). 생성자 `account_seq` 로 계좌 지정(생략 시 첫 계좌). `to_decimal` 은 `NaN`·`Infinity` 도 거부(`InvalidOperation`).
 - **MCP 안전모델** (`pytossinvest-mcp`): 3모드 `TOSSINVEST_MODE` = `read_only`(주문툴 미등록) / **`paper`**(기본, `PaperBroker` 체결 — `PaperStore` 백엔드: memory 로컬 / redis 공유) / `live`(`TOSSINVEST_ALLOW_LIVE=1` 까지 있어야 켜짐 — config validator 가 이중게이트). 가드레일(**주문통화별** 주문당·일일 상한·allow/deny(**취소에도 적용** — `check_symbol`, 조건주문은 사용자 손절일 수 있어서)·고액 confirm 필수·하드실링 거부 — KRW 1억/30억, USD $10만/$300만, 시세 응답 통화 우선·없으면 숫자로 시작=KRW·그 외=USD·FX 환산 X; 장시간 게이트는 live 전용). preview→place / preview_modify→modify 2단계 + **reserve-first 멱등성**(시도 시 원자적 예약 → 실패 시 release → 성공 시 commit; modify 도 증가분 delta 로 동형, 감액 환급 없음) + place 시 일일한도 재검사 + 부팅 시 감사로그로 당일 누적 복원 + 감사로그(JSONL). **상태 백엔드**: `TOSSINVEST_STATE_BACKEND`=`memory`(기본·단일인스턴스) / `redis`(`TOSSINVEST_REDIS_URL` 필요·HA) — `TokenStore`/`SpendStore`/`PaperStore` 심을 통해 교체 가능. redis 시 token/spend counter 가 진실의 원천(AOF), 부팅 복원 no-op. redis 백엔드는 토스 액세스 토큰도 인스턴스끼리 공유한다(`RedisTokenCache`, client secret 에서 유도한 키로 암호화). **paper 상태도 redis 로 외부화** — `RedisPaperStore`가 단일 JSON 키 `paper`에 저장(`lock:paper` 분산락), 다중 인스턴스 공유·재시작 생존. **트랜스포트 축**: `TOSSINVEST_TRANSPORT`=`stdio`(기본·무변경, `mcp.run()`) / `http`(원격, bearer 인증 필수 — `TOSSINVEST_AUTH_TOKEN` 없이 부팅 거부). mode/state_backend 와 독립(직교).
 - **설정**: `pytossinvest-mcp` 는 `pydantic-settings`, env prefix `TOSSINVEST_` (`MODE`/`ALLOW_LIVE`/`CLIENT_ID`/`CLIENT_SECRET`/`ACCOUNT_SEQ`/`MAX_ORDER_AMOUNT`/`DAILY_ORDER_LIMIT`/`ALLOW_SYMBOLS`/`DENY_SYMBOLS`/`ENFORCE_MARKET_HOURS`/`MAX_ORDER_AMOUNT_USD`/`DAILY_ORDER_LIMIT_USD`/`LIVE_CONFIRM_MIN_DELAY_SEC`/`PAPER_STARTING_CASH`/`STATE_BACKEND`/`REDIS_URL`/`TRANSPORT`/`HTTP_HOST`/`HTTP_PORT`/`AUTH_TOKEN`/`HTTP_ALLOWED_HOSTS`). `PAPER_STARTING_CASH` 는 **통화별 JSON dict**(`{"KRW":"10000000","USD":"7000"}`) 또는 스칼라(`10000000` → `{"KRW":…}` 래핑); float·bool 거부. 상세는 `pytossinvest-mcp/README.md`.
@@ -69,7 +69,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 - **notional 통화** — 가드레일은 주문통화 기준 비교(FX 환산 X). 임계는 통화별 — KRW 1억/30억, USD $10만/$300만.
 - **market_hours US 자정넘김** — 미국장을 KST 로 표기하면 23:30→06:00 처럼 자정을 넘긴다. `start > end` 면 wrap 윈도우(`now >= start or now < end`)로 처리. 깨진 시간 문자열은 "닫힘"으로 안전 처리.
 - **MCP 테스트 import** — 테스트에서 `conftest` 의 `FakeClient` 는 `from conftest import FakeClient`(pytest 가 tests/ 를 sys.path 에 넣음). `from tests.conftest` 는 `tests` 패키지가 없어 깨진다.
-- **통화 판정**(M1·C1 후속 반영): preview(`preview_order`/`preview_modify`)가 `get_prices([symbol])` 한 번으로 **권위 통화**(`Price.currency`)를 얻어 `build_spec(currency=…)` 로 주입; 조회 실패/빈결과/공백통화는 `order_currency(symbol)`(숫자로 시작=KRW — KR 코드는 영숫자 `0101N0` 도 있음 — 그 외=USD) **폴백**. 폴백은 한도가 작은 USD 쪽으로 떨어지게 짰다 — 예전 `isalpha()` 폴백은 `BRK.B` 를 KRW 로 봐 주문당 $1,000 대신 1,000,000 을 한도로 쓰는 구멍이었다(2026-09-30 수정). notional 단위는 주문통화, FX 환산 없음. KRW/USD 버킷 분리 유지. 이 권위 통화는 **장시간 게이트 국가 판정**(`_market_gate`→`_country_for_order`: USD→US·KRW→KR, 없으면 같은 `order_currency` 폴백)에도 재사용 — 가드레일 통화와 미/한국장 판정이 한 소스.
+- **주문 통화 판정**: 일반·조건주문과 정정은 시세 응답의 통화를 정규화해 KRW·USD 한도와 장시간 판정에 사용한다. 다른 통화는 거부한다. 시세 통화가 비거나 조회에 실패하면 숫자로 시작하는 코드는 KRW(예 `0101N0`), 나머지는 USD(예 `BRK.B`)로 본다. 주문 전 점검도 통화 생략 시 같은 기준을 쓰고 키 없는 paper에서는 시세 조회를 생략한다. 세부 동작은 [MCP 위키](docs/wiki/pytossinvest-mcp.md) 참고.
 - **modify 델타 회계(M1)** — `preview_modify` 가 원본 주문 명목(`get_order` 의 price×qty)을 `spec.prev_notional` 로 잡고, 일일 버킷에는 **증가분만**(`max(0, new−old)`) 검사·가산한다. per-order/고액/하드실링은 여전히 전액. **줄이는 정정은 환급 없음**(2026-11-12 전엔 음수 델타를 credit 으로 반영해, 앱에서 낸 주문을 줄이면 MCP 누계가 내려가 한도 100만에 150만이 나갔다. 0-하한으로는 막히지 않는다). 스토어의 0-하한은 그대로 남아 있지만 `SafetyManager` 는 더 이상 음수 델타를 넘기지 않는다.
 - **_spent 부팅 복원(memory 백엔드)** — 서버 시작 시 `audit.read_events()`→`safety.restore_spend` 가 당일(UTC ts→KST 날짜) 감사 이벤트로 누계를 되살린다. 아직 서 있는 예약을 모두 센다: 보내기 전에 쓴 `reserved` 와 `placed`·`modified` 를 `clientOrderId` 당 한 번, `reservation: released` 로 끝난 것은 제외. 그래서 체결 불명으로 끝났거나 호출 도중 프로세스가 죽은 주문도 재시작 뒤 한도에 남는다. 감사 파일을 지우면 당일 누적도 리셋된다. redis 백엔드는 counter 가 진실의 원천(AOF)이라 복원이 no-op 이다.
 - **mcp SDK ≥2.1 은 도구 예외 텍스트를 숨긴다** — `ToolError` 가 아닌 예외는 모델에 `Error executing tool <name>` 만 간다. 그래서 `server.py` 는 `@mcp.tool` 대신 **`@mcp_tool`**(`_model_facing_tool`)로 등록해 `GuardrailError`·`PaperError`·`TossInvestError`·`ValueError`·`httpx.HTTPError`(타임아웃 — 체결 불명 실패 뒤 같은 토큰 재시도 판단용) 를 `ToolError` 로 바꿔 올린다. 새 툴도 `@mcp_tool` 로 — 안 그러면 한도 거부 사유가 모델에 안 보인다.
@@ -90,7 +90,7 @@ TOSSINVEST_MODE=paper TOSSINVEST_CLIENT_ID=... TOSSINVEST_CLIENT_SECRET=... \
 특정 작업 들어갈 때 아래를 직접 읽어와서 참고. `docs/wiki/*` = **지금 어떻게 동작하나 / 어떻게 작업하나**(living, 자가갱신), `docs/superpowers/*` = **설계 시점 기록**(spec·plan, 고정).
 
 **living (docs/wiki/ — 코드 만지기 전 읽고, 만진 뒤 갱신):**
-- [docs/wiki/tossinvest-open-api.md](docs/wiki/tossinvest-open-api.md) — **토스 Open API 레퍼런스 (외부 스펙)**. 인증 2단(`X-Tossinvest-Account`)·엔드포인트 전체·요청/응답 스키마·enum·rate limit 10그룹·에러코드 전체표·주문 함정(멱등성 10분·고액확인·US 금액주문·OrderStatus 10종). 외부 API 사실관계가 필요할 때.
+- [docs/wiki/tossinvest-open-api.md](docs/wiki/tossinvest-open-api.md) — **토스 Open API 레퍼런스 (외부 스펙)**. 인증 2단(`X-Tossinvest-Account`)·엔드포인트 전체·요청/응답 스키마·enum·rate limit 그룹·에러코드 전체표·주문 함정(멱등성 10분·고액확인·US 금액주문·OrderStatus 10종). 외부 API 사실관계가 필요할 때.
 - [docs/wiki/pytossinvest-sdk.md](docs/wiki/pytossinvest-sdk.md) — **SDK 내부구조**. 공개 API 표면(클라이언트·에러·모델·money), `_request` 오케스트레이션(언래핑·계좌헤더·401재시도·레이트게이트·헤더동기화·429재시도), 모듈별 책임·함정·레이트리밋/재시도 동작(v0.0.2), 새 엔드포인트 추가 절차. `pytossinvest/` 코드 만질 때.
 - [docs/wiki/deploy.md](docs/wiki/deploy.md) — **서버 배포**. `deploy/remote.sh` 로 배포·롤백. 서버에 올리거나 되돌릴 때.
 - [docs/wiki/release.md](docs/wiki/release.md) — **PyPI 릴리스 절차**. 버전 올리기, 태그 이름, Trusted Publishing 워크플로. 새 버전을 낼 때.

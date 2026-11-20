@@ -696,3 +696,26 @@ def test_retry_that_ran_out_of_time_keeps_the_earlier_reservation(app_factory, f
     # the caller's reflex is a fresh preview, which would be a second order if the first
     # attempt filled: it is told to look first
     assert "list_orders" in str(refused.value)
+
+
+def test_readiness_uses_quote_currency_when_omitted(app_factory, fake_client, monkeypatch):
+    from pytossinvest.models import Price
+
+    def usd_prices(symbols):
+        return [Price(symbol=s, last_price="10", currency="USD") for s in symbols]
+
+    monkeypatch.setattr(fake_client, "get_prices", usd_prices)
+    app = app_factory(mode="paper", client_id="test", client_secret="test")
+    assert T.get_order_readiness(app, "005930")["buyingPower"] == "1000000"
+    assert T.get_order_readiness(app, "AAPL", currency="KRW")["buyingPower"] == "10000000"
+
+    monkeypatch.setattr(fake_client, "get_prices", lambda symbols: [])
+    live = app_factory(mode="live", allow_live=True)
+    assert T.get_order_readiness(live, "BRK.B")["buyingPower"]["currency"] == "USD"
+
+
+def test_readiness_paper_without_keys_stays_offline(app_factory, fake_client):
+    app = app_factory(mode="paper", client_id="", client_secret="")
+    out = T.get_order_readiness(app, "AAPL")
+    assert not fake_client.calls
+    assert (out["currency"], out["buyingPower"]) == ("USD", "1000000")
